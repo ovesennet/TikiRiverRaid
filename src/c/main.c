@@ -77,12 +77,82 @@ static void draw_sprite(uint8_t x, uint8_t y,
                       rects[i].w, rects[i].h, colour);
 }
 
-/* ── HUD drawing (full, for initial draw and repair) ── */
+/* ── Game state ── */
+static uint16_t score;
+static uint8_t fuel_level;     /* 0..32: fuel gauge width in pixels */
+
+/* Forward declaration */
+static void draw_centred(uint16_t y, const char *str, uint8_t colour);
+
+#define FUEL_MAX       32      /* full gauge width in pixels */
+#define FUEL_GAUGE_X   98      /* gauge bar left edge */
+#define FUEL_GAUGE_Y   243     /* gauge bar top */
+#define FUEL_GAUGE_H   5       /* gauge bar height */
+
+/* ── Number to decimal string (right-aligned, up to 5 digits) ── */
+static char score_buf[7];
+static void uint16_to_str(uint16_t val, char *buf)
+{
+    uint8_t i;
+    buf[0] = ' '; buf[1] = ' '; buf[2] = ' ';
+    buf[3] = ' '; buf[4] = ' '; buf[5] = '\0';
+    i = 4;
+    if (val == 0) {
+        buf[i] = '0';
+        return;
+    }
+    while (val > 0) {
+        buf[i] = '0' + (uint8_t)(val % 10);
+        val = val / 10;
+        if (i == 0) break;
+        i--;
+    }
+}
+
+/* ── HUD drawing (full, for initial draw) ── */
 static void draw_hud(void)
 {
     vid_hline(0, 255, HUD_SEP_Y, COL_BLACK);
     vid_fill_rect(0, HUD_TOP, 128, HUD_HEIGHT, HUD_COLOUR);
     vid_fill_rect(128, HUD_TOP, 128, HUD_HEIGHT, HUD_COLOUR);
+
+    /* Score */
+    uint16_to_str(score, score_buf);
+    draw_centred(HUD_TOP + 1, score_buf, COL_YELLOW);
+
+    /* Fuel gauge frame: "E" [bar area] "F" */
+    vid_draw_text(FUEL_GAUGE_X - 12, FUEL_GAUGE_Y - 1, "E", COL_WHITE);
+    vid_draw_text(FUEL_GAUGE_X + FUEL_MAX + 4, FUEL_GAUGE_Y - 1, "F", COL_WHITE);
+    /* Gauge outline (1px border) */
+    vid_hline(FUEL_GAUGE_X - 1, FUEL_GAUGE_X + FUEL_MAX, FUEL_GAUGE_Y - 1, COL_WHITE);
+    vid_hline(FUEL_GAUGE_X - 1, FUEL_GAUGE_X + FUEL_MAX, FUEL_GAUGE_Y + FUEL_GAUGE_H, COL_WHITE);
+    vid_fill_rect(FUEL_GAUGE_X - 1, FUEL_GAUGE_Y, 1, FUEL_GAUGE_H, COL_WHITE);
+    vid_fill_rect(FUEL_GAUGE_X + FUEL_MAX, FUEL_GAUGE_Y, 1, FUEL_GAUGE_H, COL_WHITE);
+    /* Fill gauge */
+    if (fuel_level > 0)
+        vid_fill_rect(FUEL_GAUGE_X, FUEL_GAUGE_Y, fuel_level, FUEL_GAUGE_H, COL_BRGREEN);
+
+    /* ACTIVISION logo text */
+    draw_centred(HUD_TOP + HUD_HEIGHT - 7, "ACTIVISION", COL_BRBLUE);
+}
+
+/* ── Update score display (call when score changes) ── */
+static void update_score(void)
+{
+    uint16_to_str(score, score_buf);
+    /* Clear score area and redraw */
+    vid_fill_rect(80, HUD_TOP + 1, 96, 7, HUD_COLOUR);
+    draw_centred(HUD_TOP + 1, score_buf, COL_YELLOW);
+}
+
+/* ── Update fuel gauge bar (call when fuel_level changes) ── */
+static void update_fuel_gauge(void)
+{
+    /* Clear gauge interior */
+    vid_fill_rect(FUEL_GAUGE_X, FUEL_GAUGE_Y, FUEL_MAX, FUEL_GAUGE_H, HUD_COLOUR);
+    /* Fill to current level */
+    if (fuel_level > 0)
+        vid_fill_rect(FUEL_GAUGE_X, FUEL_GAUGE_Y, fuel_level, FUEL_GAUGE_H, COL_BRGREEN);
 }
 
 /* ── Centre text on screen (256px wide, 6px per char) ── */
@@ -165,6 +235,8 @@ static void game_loop(void)
     scroll_speed = SCROLL_SPEED_DEFAULT;
     plane_x = PLANE_START_X;
     sav_valid = 0;
+    score = 0;
+    fuel_level = FUEL_MAX;
 
     /* Init river with game seed */
     river_init(RNG_SEED);
@@ -241,6 +313,16 @@ static void game_loop(void)
                 fuel_x = fuel_x & 0xFE;
             }
         }
+
+        /* Score: +10 per batch */
+        score += 10;
+
+        /* Fuel: slowly deplete */
+        if (fuel_level > 0)
+            fuel_level--;
+
+        /* Redraw full HUD (scroll shifts it every step) */
+        draw_hud();
     }
 
     /* Reset scroll before returning to title */

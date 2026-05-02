@@ -48,15 +48,15 @@
 #define WATER_COLOUR   COL_BLUE
 
 /* ── HUD / score area at bottom ────────────────────────────── */
-#define HUD_TOP         236
-#define HUD_HEIGHT      20     /* Y=236 to Y=255 */
-#define HUD_SEP_Y       235    /* black separator line */
-#define HUD_COLOUR      COL_LTGREY
+#define HUD_TOP         232
+#define HUD_HEIGHT      24     /* Y=232 to Y=255 */
+#define HUD_SEP_Y       231    /* black separator line */
+#define HUD_COLOUR      COL_BLACK
 
 /* ── Player plane ──────────────────────────────────────────── */
 #define PLANE_W         12
 #define PLANE_H         12
-#define PLANE_Y         213    /* HUD_SEP_Y - 10 - PLANE_H */
+#define PLANE_Y         207    /* HUD_SEP_Y - 12 - PLANE_H */
 #define PLANE_START_X   122    /* (SCREEN_W - PLANE_W) / 2 */
 
 /* Plane sprite poses */

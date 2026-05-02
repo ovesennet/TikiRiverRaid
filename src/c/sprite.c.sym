@@ -1,0 +1,16 @@
+_blit_out_active                = $0000 ; addr, global, , , bss_compiler, C:\code\TikiRiverRaid\src\c\sprite.c::sprite_prepare_blit::0::3:41
+_blit_out_row                   = $0002 ; addr, global, , , bss_compiler, C:\code\TikiRiverRaid\src\c\sprite.c::sprite_prepare_blit::0::3:41
+_blit_out_x                     = $0001 ; addr, global, , , bss_compiler, C:\code\TikiRiverRaid\src\c\sprite.c::sprite_prepare_blit::0::3:41
+_spawn_timer                    = $0006 ; addr, local, , , bss_compiler, C:\code\TikiRiverRaid\src\c\sprite.c::sprite_prepare_blit::0::3:41
+_spr_active                     = $0003 ; addr, local, , , bss_compiler, C:\code\TikiRiverRaid\src\c\sprite.c::sprite_prepare_blit::0::3:41
+_spr_enter_row                  = $0005 ; addr, local, , , bss_compiler, C:\code\TikiRiverRaid\src\c\sprite.c::sprite_prepare_blit::0::3:41
+_spr_x                          = $0004 ; addr, local, , , bss_compiler, C:\code\TikiRiverRaid\src\c\sprite.c::sprite_prepare_blit::0::3:41
+_sprite_check_spawn             = $000C ; addr, global, , , code_compiler, C:\code\TikiRiverRaid\src\c\sprite.c::sprite_check_spawn::0::1:22
+_sprite_init                    = $0000 ; addr, global, , , code_compiler, C:\code\TikiRiverRaid\src\c\sprite.c::sprite_init::0::0:16
+_sprite_prepare_blit            = $0073 ; addr, global, , , code_compiler, C:\code\TikiRiverRaid\src\c\sprite.c::sprite_prepare_blit::0::3:41
+i_2                             = $0019 ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\sprite.c::sprite_check_spawn::0::1:22
+i_3                             = $002D ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\sprite.c::sprite_check_spawn::0::1:22
+i_4                             = $00AF ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\sprite.c::sprite_prepare_blit::0::3:41
+i_5                             = $00AF ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\sprite.c::sprite_prepare_blit::0::3:41
+i_6_i_5                         = $0086 ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\sprite.c::sprite_prepare_blit::0::3:41
+i_7                             = $00AF ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\sprite.c::sprite_prepare_blit::0::3:41

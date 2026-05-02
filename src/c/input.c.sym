@@ -1,0 +1,17 @@
+_input_any                      = $0095 ; addr, global, , , code_compiler, C:\code\TikiRiverRaid\src\c\input.c::input_any::0::6:51
+_input_flush                    = $0013 ; addr, global, , , code_compiler, C:\code\TikiRiverRaid\src\c\input.c::input_flush::0::2:29
+_input_held                     = $0032 ; addr, global, , , code_compiler, C:\code\TikiRiverRaid\src\c\input.c::input_held::0::4:41
+_input_init                     = $0000 ; addr, global, , , code_compiler, C:\code\TikiRiverRaid\src\c\input.c::input_init::0::0:17
+_input_poll                     = $001F ; addr, global, , , code_compiler, C:\code\TikiRiverRaid\src\c\input.c::input_poll::0::3:35
+_input_pressed                  = $0053 ; addr, global, , , code_compiler, C:\code\TikiRiverRaid\src\c\input.c::input_pressed::0::5:46
+_input_shutdown                 = $000F ; addr, global, , , code_compiler, C:\code\TikiRiverRaid\src\c\input.c::input_shutdown::0::1:24
+_s_cur                          = $0000 ; addr, local, , , bss_compiler, C:\code\TikiRiverRaid\src\c\input.c::input_any::0::6:51
+_s_prev                         = $0001 ; addr, local, , , bss_compiler, C:\code\TikiRiverRaid\src\c\input.c::input_any::0::6:51
+i_2                             = $004D ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\input.c::input_held::0::4:41
+i_3                             = $0050 ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\input.c::input_held::0::4:41
+i_4                             = $0083 ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\input.c::input_pressed::0::5:46
+i_5                             = $0086 ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\input.c::input_pressed::0::5:46
+i_6                             = $008F ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\input.c::input_pressed::0::5:46
+i_7                             = $0092 ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\input.c::input_pressed::0::5:46
+i_8                             = $00A2 ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\input.c::input_any::0::6:51
+i_9                             = $00A5 ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\input.c::input_any::0::6:51

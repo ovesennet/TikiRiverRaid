@@ -1,0 +1,15 @@
+KBIT_ANY                        = $0007 ; const, local, , , code_driver, C:\code\TikiRiverRaid\src\asm\keyboard.asm:28
+KBIT_FIRE                       = $0002 ; const, local, , , code_driver, C:\code\TikiRiverRaid\src\asm\keyboard.asm:25
+KBIT_LEFT                       = $0000 ; const, local, , , code_driver, C:\code\TikiRiverRaid\src\asm\keyboard.asm:23
+KBIT_PAUSE                      = $0004 ; const, local, , , code_driver, C:\code\TikiRiverRaid\src\asm\keyboard.asm:27
+KBIT_QUIT                       = $0003 ; const, local, , , code_driver, C:\code\TikiRiverRaid\src\asm\keyboard.asm:26
+KBIT_RIGHT                      = $0001 ; const, local, , , code_driver, C:\code\TikiRiverRaid\src\asm\keyboard.asm:24
+_kbd_init                       = $0000 ; addr, public, , , code_driver, C:\code\TikiRiverRaid\src\asm\keyboard.asm:30
+_kbd_scan                       = $0002 ; addr, public, , , code_driver, C:\code\TikiRiverRaid\src\asm\keyboard.asm:41
+_kbd_shutdown                   = $0001 ; addr, public, , , code_driver, C:\code\TikiRiverRaid\src\asm\keyboard.asm:33
+ks_no_a                         = $0022 ; addr, local, , , code_driver, C:\code\TikiRiverRaid\src\asm\keyboard.asm:70
+ks_no_any                       = $0070 ; addr, local, , , code_driver, C:\code\TikiRiverRaid\src\asm\keyboard.asm:147
+ks_no_d                         = $0035 ; addr, local, , , code_driver, C:\code\TikiRiverRaid\src\asm\keyboard.asm:86
+ks_no_p                         = $0051 ; addr, local, , , code_driver, C:\code\TikiRiverRaid\src\asm\keyboard.asm:114
+ks_no_q                         = $0028 ; addr, local, , , code_driver, C:\code\TikiRiverRaid\src\asm\keyboard.asm:74
+ks_no_spc                       = $0015 ; addr, local, , , code_driver, C:\code\TikiRiverRaid\src\asm\keyboard.asm:58

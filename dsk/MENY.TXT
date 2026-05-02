@@ -1,0 +1,51 @@
+; VER 56 TAB-
+; Kode for blanking av skjerm
+
+; Start p} tekster internt i MENY programmet:
+;
+Feil format p} MENY.TXT filen!
+Feil "BIOS" for MENY-system!
+Feil "CCP" for MENY-system!
+Slutt p} meny. Kj|r vanlig TIKO.
+Tast <RETUR> for } fortsette -
+ -->
+  
+fjern?
+fjern
+finner ikke
+?
+J
+; Tekster skrevet ut ved MENY ? kommando
+;
+Lovlig program-syntaks:
+  MENY
+NB:
+  For at menysystemet skal virke, m}
+  INSTALL programmet sette opp MENY som
+  automatisk kommando etter oppstart.
+;
+;       Start p} MENY-skjermbilde tekster.
+;       Merk: F|rste linje m} v{re blank.
+
+ *************************************
+ *****   Tiki-100 program meny   *****
+ *****      Tiki Data A/S        *****
+
+  'Avslutt meny, kj|r vanlig TIKO'  'KPM'
+R 'Vis enkel filkatalog          '  'DIR'        'Hvilke filer? '
+R 'Vis utvidet filkatalog        '  'KAT'        'Hvilke filer? '
+  'Kopier filer                  '  'KOPI'       'Kopier hvilke filer? '
+  'Enkel programeditor           '  'EDIT'       'Hvilken fil vil du redigere? '
+  'Kopier TIKO                   '  'TIKOKOPI'
+  'Installer TIKO                '  'INSTALL'
+R 'Sett filattributter           '  'SETT'     'Filer og attributter: '
+  'Formater ny diskett           '  'NYPLATE'
+  'Spill PYTON                   '  'PYTON'
+  'Spill SJAKK                   '  'SJAKK'
+  'R}kopier disketter            '  'R]KOPI'
+R 'Kommando-oversikt             '  '!'
+R 'Endre navn p} fil             '  'REN'      'Skriv: <nyfil>=<gammelfil>'
+R 'Slett fil(er)                 '  'ERA'      'Hvilke filer ? '
+R 'TIKI ARKANOID                 '  'TIKIARK'
+Velg program:
+

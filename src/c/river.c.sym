@@ -1,0 +1,14 @@
+_next_random                    = $0019 ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\river.c::next_random::0::1:24
+_river_generate_line            = $004B ; addr, global, , , code_compiler, C:\code\TikiRiverRaid\src\c\river.c::river_generate_line::0::2:33
+_river_init                     = $0000 ; addr, global, , , code_compiler, C:\code\TikiRiverRaid\src\c\river.c::river_init::0::0:15
+_river_width                    = $0002 ; addr, local, , , bss_compiler, C:\code\TikiRiverRaid\src\c\river.c::river_generate_line::0::2:33
+_rng_state                      = $0000 ; addr, local, , , bss_compiler, C:\code\TikiRiverRaid\src\c\river.c::river_generate_line::0::2:33
+_segment_lines                  = $0004 ; addr, local, , , bss_compiler, C:\code\TikiRiverRaid\src\c\river.c::river_generate_line::0::2:33
+_target_width                   = $0003 ; addr, local, , , bss_compiler, C:\code\TikiRiverRaid\src\c\river.c::river_generate_line::0::2:33
+i_2                             = $0044 ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\river.c::next_random::0::1:24
+i_3                             = $008B ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\river.c::river_generate_line::0::2:33
+i_4                             = $00BB ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\river.c::river_generate_line::0::2:33
+i_5                             = $00ED ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\river.c::river_generate_line::0::2:33
+i_6                             = $00ED ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\river.c::river_generate_line::0::2:33
+i_7                             = $00ED ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\river.c::river_generate_line::0::2:33
+i_8                             = $00ED ; addr, local, , , code_compiler, C:\code\TikiRiverRaid\src\c\river.c::river_generate_line::0::2:33

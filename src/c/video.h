@@ -17,8 +17,8 @@ void vid_draw_text(uint16_t x, uint16_t y, const char *str, uint8_t colour);
 /* Draw one full-width river line (land + water + land) in a single VRAM switch */
 void vid_draw_river_line(uint8_t y, uint8_t left, uint8_t right);
 
-/* Combined game step: river line + HUD repair + plane sprite + optional fuel blit, ONE bank switch */
-void vid_game_step(uint8_t riv_line_y, uint8_t left, uint8_t right,
+/* Combined game step: erase plane, scroll, river+HUD, draw plane — ONE bank switch */
+void vid_game_step(uint8_t scroll_reg, uint8_t riv_line_y, uint8_t left, uint8_t right,
                    uint8_t plane_x, uint8_t plane_y, uint8_t plane_col);
 
 /* Set fuel sprite blit params (call before vid_game_step) */

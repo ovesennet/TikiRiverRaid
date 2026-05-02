@@ -119,6 +119,9 @@ _gs_blit_x:      defs 1
 _gs_blit_row:    defs 1
 _gs_do_plane:    defs 1
 
+    PUBLIC  _gs_scroll_reg
+_gs_scroll_reg:  defs 1
+
 ; Scroll value
     PUBLIC  _scroll_val
 
@@ -148,6 +151,7 @@ SAV_W_BYTES equ 10             ; 20 pixels, covers 18px bbox + alignment
 SAV_H_ROWS  equ 15             ; 14px plane + 1 trail row
 
 _sav_buf:      defs SAV_W_BYTES * SAV_H_ROWS   ; 150 bytes
+_sav_scroll:   defs 1          ; scroll_reg value at time of last save
 
 ; ── Pre-generated step buffer for batched frame rendering ──
     PUBLIC  _step_buf
@@ -738,6 +742,7 @@ ps_noc:
     ret
 
 ; ============================================================
+; ============================================================
 ; draw_plane_sprite — table-driven sprite draw
 ; Input: HL = pointer to sprite data (count byte + rect data)
 ;        Uses _gs_plane_x, _gs_plane_y, _gs_plane_col
@@ -800,7 +805,7 @@ _vid_game_step_asm:
 
     call    swapgfxbk
 
-    ; === RIVER LINE (same as vid_draw_river_line_asm body) ===
+    ; === RIVER LINE ===
     ; Left bank: x=0 to riv_left-1
     ld      a, (_riv_left)
     or      a
@@ -957,36 +962,55 @@ gs_no_right:
     ld      (_gfx_colour), a
     call    hline_raw
 
-    ; === Scroll adjustment: always increment sav_y (accumulates across calls) ===
-    ld      a, (_sav_y)
-    inc     a
-    ld      (_sav_y), a
-
-    ; === Check if plane operations are needed this step ===
+    ; === PLANE (gated by gs_do_plane, scroll-aware save-under) ===
     ld      a, (_gs_do_plane)
     or      a
-    jr      z, gs_skip_plane
+    jp      z, gs_skip_plane
 
-    ; === PLANE: restore saved background (erase old sprite) ===
+    ; --- Restore old background at scroll-adjusted position ---
+    ld      a, (_sav_valid)
+    or      a
+    jr      z, gs_no_restore
+
+    ; delta = sav_scroll - gs_scroll_reg (mod 256)
+    ; Since scroll_reg decrements, delta = number of scroll steps since save
+    ld      a, (_sav_scroll)
+    ld      b, a
+    ld      a, (_gs_scroll_reg)
+    ld      c, a
+    ld      a, b
+    sub     c               ; A = delta (unsigned 8-bit, wraps correctly)
+
+    ; restore_y = plane_y + delta (ring buffer wraps at 256)
+    ld      b, a
+    ld      a, (_gs_plane_y)
+    add     a, b
+    ld      (_sav_y), a
+
     call    plane_restore
 
-    ; === PLANE: save new background before drawing ===
+gs_no_restore:
+    ; --- Save fresh background at current plane position ---
     call    plane_save
 
-    ; === PLANE SPRITE — table-driven, selected by pose ===
+    ; --- Record scroll_reg for next restore ---
+    ld      a, (_gs_scroll_reg)
+    ld      (_sav_scroll), a
+
+    ; --- Draw plane sprite ---
     ld      a, (_gs_plane_pose)
     or      a
     jr      z, gs_pose_fwd
     cp      1
     jr      z, gs_pose_left
     ld      hl, spr_right_data
-    jr      gs_pose_draw
+    jr      gs_pose_go
 gs_pose_fwd:
     ld      hl, spr_fwd_data
-    jr      gs_pose_draw
+    jr      gs_pose_go
 gs_pose_left:
     ld      hl, spr_left_data
-gs_pose_draw:
+gs_pose_go:
     call    draw_plane_sprite
 
 gs_skip_plane:

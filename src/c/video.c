@@ -55,6 +55,8 @@ extern uint8_t  gs_blit_active;
 extern uint8_t  gs_blit_x;
 extern uint8_t  gs_blit_row;
 
+extern uint8_t  gs_scroll_reg;
+
 extern uint8_t  step_buf[];
 extern uint8_t  step_count;
 
@@ -132,9 +134,10 @@ void vid_draw_river_line(uint8_t y, uint8_t left, uint8_t right)
     vid_draw_river_line_asm();
 }
 
-void vid_game_step(uint8_t riv_line_y, uint8_t left, uint8_t right,
+void vid_game_step(uint8_t scroll_reg, uint8_t riv_line_y, uint8_t left, uint8_t right,
                    uint8_t plane_x, uint8_t plane_y, uint8_t plane_col)
 {
+    gs_scroll_reg = scroll_reg;
     riv_y = riv_line_y;
     riv_left = left;
     riv_right = right;

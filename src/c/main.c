@@ -186,59 +186,60 @@ static void game_loop(void)
     gl_input_ctr = 0;
 
     for (;;) {
-        /* Poll input every 4 scroll lines */
-        gl_input_ctr++;
-        if (gl_input_ctr >= 4) {
-            gl_input_ctr = 0;
-            gl_keys = kbd_scan();
+        /* Input once per batch */
+        gl_keys = kbd_scan();
 
-            if (gl_keys & KBIT_LEFT) {
-                if (plane_x >= MOVE_SPEED)
-                    plane_x -= MOVE_SPEED;
-                vid_set_plane_pose(POSE_LEFT);
-            } else if (gl_keys & KBIT_RIGHT) {
-                if (plane_x <= (uint8_t)(244 - MOVE_SPEED))
-                    plane_x += MOVE_SPEED;
-                vid_set_plane_pose(POSE_RIGHT);
-            } else {
-                vid_set_plane_pose(POSE_FWD);
-            }
-
-            if (gl_keys & KBIT_QUIT)
-                break;
-
-            gs_do_plane = 1;
+        if (gl_keys & KBIT_LEFT) {
+            if (plane_x >= MOVE_SPEED)
+                plane_x -= MOVE_SPEED;
+            vid_set_plane_pose(POSE_LEFT);
+        } else if (gl_keys & KBIT_RIGHT) {
+            if (plane_x <= (uint8_t)(244 - MOVE_SPEED))
+                plane_x += MOVE_SPEED;
+            vid_set_plane_pose(POSE_RIGHT);
         } else {
-            gs_do_plane = 0;
+            vid_set_plane_pose(POSE_FWD);
         }
 
-        /* Scroll 1 line */
-        gl_scroll_reg--;
-        scroll_set(gl_scroll_reg);
-        river_generate_line(&gl_left, &gl_right);
+        if (gl_keys & KBIT_QUIT)
+            break;
 
-        /* Fuel barrel */
-        if (fuel_step < FUEL_H) {
-            vid_set_blit(1, fuel_x, (uint8_t)fuel_step);
-        } else {
-            vid_set_blit(0, 0, 0);
-        }
+        /* Batch scroll_speed steps per vblank */
+        for (gl_input_ctr = 0; gl_input_ctr < scroll_speed; gl_input_ctr++) {
+            gl_scroll_reg--;
+            scroll_set(gl_scroll_reg);
+            river_generate_line(&gl_left, &gl_right);
 
-        vid_game_step(0, gl_left, gl_right, plane_x, PLANE_Y, COL_YELLOW);
-
-        fuel_step++;
-        if (fuel_step >= (uint16_t)(FUEL_H + fuel_gap)) {
-            uint8_t rnd, range;
-            fuel_step = 0;
-            rnd = frame_counter ^ gl_scroll_reg;
-            fuel_gap = 250 + (uint16_t)(rnd & 0xFF) * 4;
-            range = gl_right - gl_left;
-            if (range > FUEL_W + 4) {
-                fuel_x = gl_left + 2 + (rnd % (range - FUEL_W - 2));
+            /* Fuel barrel */
+            if (fuel_step < FUEL_H) {
+                vid_set_blit(1, fuel_x, (uint8_t)fuel_step);
             } else {
-                fuel_x = gl_left + 2;
+                vid_set_blit(0, 0, 0);
             }
-            fuel_x = fuel_x & 0xFE;
+
+            /* Draw plane only on last step (after all scrolls) */
+            if (gl_input_ctr + 1 == scroll_speed) {
+                gs_do_plane = 1;
+            } else {
+                gs_do_plane = 0;
+            }
+
+            vid_game_step(gl_scroll_reg, 0, gl_left, gl_right, plane_x, PLANE_Y, COL_YELLOW);
+
+            fuel_step++;
+            if (fuel_step >= (uint16_t)(FUEL_H + fuel_gap)) {
+                uint8_t rnd, range;
+                fuel_step = 0;
+                rnd = frame_counter ^ gl_scroll_reg;
+                fuel_gap = 250 + (uint16_t)(rnd & 0xFF) * 4;
+                range = gl_right - gl_left;
+                if (range > FUEL_W + 4) {
+                    fuel_x = gl_left + 2 + (rnd % (range - FUEL_W - 2));
+                } else {
+                    fuel_x = gl_left + 2;
+                }
+                fuel_x = fuel_x & 0xFE;
+            }
         }
     }
 

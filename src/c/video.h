@@ -24,6 +24,13 @@ void vid_game_step(uint8_t riv_line_y, uint8_t left, uint8_t right,
 /* Set fuel sprite blit params (call before vid_game_step) */
 void vid_set_blit(uint8_t active, uint8_t x, uint8_t row);
 
+/* Set plane sprite pose: 0=forward, 1=left, 2=right (call before vid_game_step) */
+void vid_set_plane_pose(uint8_t pose);
+
+/* Batched frame: pre-fill step_buf, then call this for ONE bank switch */
+void vid_game_frame(uint8_t num_steps,
+                    uint8_t plane_x, uint8_t plane_y, uint8_t plane_col);
+
 /* Batched VRAM access — bracket multiple _nr calls in a single bank switch */
 void vid_begin_vram(void);
 void vid_end_vram(void);

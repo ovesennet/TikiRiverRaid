@@ -20,6 +20,7 @@
     PUBLIC  _vid_draw_text_gfx
     PUBLIC  _vid_draw_river_line_asm
     PUBLIC  _vid_game_step_asm
+    PUBLIC  _vid_game_frame_asm
     PUBLIC  _vid_begin_vram_asm
     PUBLIC  _vid_end_vram_asm
     PUBLIC  _vid_hline_nr_asm
@@ -94,6 +95,7 @@ _riv_water_col: defs 1
     PUBLIC  _gs_plane_x
     PUBLIC  _gs_plane_y
     PUBLIC  _gs_plane_col
+    PUBLIC  _gs_plane_pose
     PUBLIC  _gs_hud_sep_y
     PUBLIC  _gs_hud_top_y
     PUBLIC  _gs_hud_col
@@ -101,6 +103,7 @@ _riv_water_col: defs 1
 _gs_plane_x:   defs 1
 _gs_plane_y:   defs 1
 _gs_plane_col: defs 1
+_gs_plane_pose: defs 1
 _gs_hud_sep_y: defs 1
 _gs_hud_top_y: defs 1
 _gs_hud_col:   defs 1
@@ -109,10 +112,12 @@ _gs_hud_col:   defs 1
     PUBLIC  _gs_blit_active
     PUBLIC  _gs_blit_x
     PUBLIC  _gs_blit_row
+    PUBLIC  _gs_do_plane
 
 _gs_blit_active: defs 1
 _gs_blit_x:      defs 1
 _gs_blit_row:    defs 1
+_gs_do_plane:    defs 1
 
 ; Scroll value
     PUBLIC  _scroll_val
@@ -127,6 +132,30 @@ _saved_f057:    defs 3          ; save original 3 bytes at $F057
 
 ; Text string buffer (high memory copy)
 _txt_strbuf:   defs 32
+
+; ── Save-under buffer for plane sprite ──
+; Bounding box: 10 bytes wide (20px) × 15 rows = 150 bytes
+; Stores raw VRAM bytes under the plane so background can be restored
+    PUBLIC  _sav_valid
+
+_sav_valid:    defs 1          ; 0 = no saved data yet, 1 = valid
+_sav_x_byte:   defs 1          ; byte-aligned X/2 of saved region
+_sav_y:        defs 1          ; screen Y of saved region
+_sav_w:        defs 1          ; width in bytes (always SAV_W_BYTES)
+_sav_h:        defs 1          ; height in rows (always SAV_H_ROWS)
+
+SAV_W_BYTES equ 10             ; 20 pixels, covers 18px bbox + alignment
+SAV_H_ROWS  equ 15             ; 14px plane + 1 trail row
+
+_sav_buf:      defs SAV_W_BYTES * SAV_H_ROWS   ; 150 bytes
+
+; ── Pre-generated step buffer for batched frame rendering ──
+    PUBLIC  _step_buf
+    PUBLIC  _step_count
+
+_step_buf:     defs 48         ; 8 entries × 6 bytes (scroll,left,right,fuel_act,fuel_x,fuel_row)
+_step_count:   defs 1
+_step_ptr:     defs 2          ; internal scratch pointer
 
     SECTION code_graphics
 
@@ -435,10 +464,332 @@ rivl_no_right:
     ret
 
 ; ============================================================
+; draw_river_fuel — one river scanline + optional fuel overlay
+; Must be called with VRAM banked in.
+; Reads: _riv_y, _riv_left, _riv_right, _riv_land_col, _riv_water_col
+;        _gs_blit_active, _gs_blit_x, _gs_blit_row
+; ============================================================
+draw_river_fuel:
+    ; Left bank: x=0 to riv_left-1
+    ld      a, (_riv_left)
+    or      a
+    jr      z, drf_no_left
+    xor     a
+    ld      (_gfx_x1), a
+    ld      a, (_riv_left)
+    dec     a
+    ld      (_gfx_x2), a
+    ld      a, (_riv_land_col)
+    ld      (_gfx_colour), a
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    call    hline_raw
+drf_no_left:
+    ; Water: riv_left to riv_right
+    ld      a, (_riv_left)
+    ld      (_gfx_x1), a
+    ld      a, (_riv_right)
+    ld      (_gfx_x2), a
+    ld      a, (_riv_water_col)
+    ld      (_gfx_colour), a
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    call    hline_raw
+    ; Fuel overlay (if active)
+    ld      a, (_gs_blit_active)
+    or      a
+    jp      z, drf_no_fuel
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_blit_row)
+    cp      2
+    jr      c, drf_fuel_narrow
+    cp      22
+    jr      nc, drf_fuel_narrow
+    ; Wide red body: x+1 to x+12
+    ld      a, (_gs_blit_x)
+    inc     a
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 12
+    ld      (_gfx_x2), a
+    ld      a, 4
+    ld      (_gfx_colour), a
+    call    hline_raw
+    ld      a, (_gs_blit_row)
+    cp      5
+    jr      z, drf_fuel_white
+    cp      6
+    jr      z, drf_fuel_white
+    cp      7
+    jr      z, drf_fuel_white
+    cp      16
+    jr      z, drf_fuel_white
+    cp      17
+    jr      z, drf_fuel_white
+    cp      18
+    jr      z, drf_fuel_white
+    jr      drf_fuel_done
+drf_fuel_white:
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_blit_x)
+    add     a, 3
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 10
+    ld      (_gfx_x2), a
+    ld      a, 15
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jr      drf_fuel_done
+drf_fuel_narrow:
+    ld      a, (_gs_blit_x)
+    add     a, 3
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 10
+    ld      (_gfx_x2), a
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, 4
+    ld      (_gfx_colour), a
+    call    hline_raw
+drf_fuel_done:
+    xor     a
+    ld      (_gs_blit_active), a
+drf_no_fuel:
+    ; Right bank: riv_right+1 to 255
+    ld      a, (_riv_right)
+    cp      255
+    jr      z, drf_no_right
+    inc     a
+    ld      (_gfx_x1), a
+    ld      a, 255
+    ld      (_gfx_x2), a
+    ld      a, (_riv_land_col)
+    ld      (_gfx_colour), a
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    call    hline_raw
+drf_no_right:
+    ret
+
+; ============================================================
+; Plane sprite data tables: count, then (dx, dy, w, h) per rect
+; ============================================================
+spr_fwd_data:
+    defb    7
+    defb    5, 0, 2, 2         ; nose
+    defb    4, 2, 4, 2         ; upper body
+    defb    2, 4, 8, 2         ; mid body
+    defb    0, 6, 12, 2        ; wings
+    defb    4, 8, 4, 2         ; lower body
+    defb    2, 10, 2, 2        ; left tail
+    defb    8, 10, 2, 2        ; right tail
+
+spr_left_data:
+    defb    8
+    defb    4, 0, 2, 2         ; nose shifted left
+    defb    3, 2, 4, 2         ; upper body
+    defb    1, 4, 8, 2         ; mid body
+    defb    0, 6, 12, 1        ; wings wide
+    defb    2, 7, 10, 1        ; wings taper
+    defb    4, 8, 4, 2         ; lower body
+    defb    2, 10, 2, 2        ; left tail
+    defb    8, 10, 2, 2        ; right tail
+
+spr_right_data:
+    defb    8
+    defb    6, 0, 2, 2         ; nose shifted right
+    defb    5, 2, 4, 2         ; upper body
+    defb    3, 4, 8, 2         ; mid body
+    defb    0, 6, 12, 1        ; wings wide
+    defb    0, 7, 10, 1        ; wings taper
+    defb    4, 8, 4, 2         ; lower body
+    defb    2, 10, 2, 2        ; left tail
+    defb    8, 10, 2, 2        ; right tail
+
+; ============================================================
+; plane_restore — copy saved buffer back to VRAM (erase old sprite)
+; Must be called with VRAM banked in.
+; Skips if _sav_valid == 0.
+; ============================================================
+plane_restore:
+    ld      a, (_sav_valid)
+    or      a
+    ret     z
+
+    ld      a, (_sav_h)
+    ld      b, a
+    ld      de, _sav_buf       ; source = save buffer
+
+pr_row:
+    push    bc
+
+    ; Compute VRAM addr: _sav_y * 128 + _sav_x_byte
+    ld      a, (_sav_y)
+    srl     a
+    ld      h, a
+    ld      a, (_sav_y)
+    rrca
+    and     $80
+    ld      l, a
+    ld      a, (_sav_x_byte)
+    add     a, l
+    ld      l, a
+    jr      nc, pr_noc
+    inc     h
+pr_noc:
+    ; HL = VRAM dest, DE = buffer source
+    push    hl
+    ex      de, hl             ; HL = source (buffer), DE = dest (VRAM)
+    ld      bc, SAV_W_BYTES
+    ldir                       ; copy buffer → VRAM
+    ex      de, hl             ; DE = updated buffer ptr
+    pop     hl                 ; discard (we don't need old HL)
+
+    ; Advance _sav_y for next row
+    ld      a, (_sav_y)
+    inc     a                  ; wraps 255→0 (ring buffer)
+    ld      (_sav_y), a
+
+    pop     bc
+    djnz    pr_row
+    ret
+
+; ============================================================
+; plane_save — copy VRAM background into save buffer (before draw)
+; Must be called with VRAM banked in.
+; Input: compute sav_x_byte and sav_y from _gs_plane_x, _gs_plane_y
+;        before calling this.
+; Sets _sav_valid = 1.
+; ============================================================
+plane_save:
+    ; Compute byte-aligned X: floor((plane_x - 3) / 2), clamped
+    ld      a, (_gs_plane_x)
+    sub     3
+    jr      nc, ps_xok
+    xor     a
+ps_xok:
+    srl     a                  ; x_byte = (plane_x - 3) / 2
+    ld      (_sav_x_byte), a
+
+    ; Save Y
+    ld      a, (_gs_plane_y)
+    ld      (_sav_y), a
+
+    ; Save dimensions
+    ld      a, SAV_W_BYTES
+    ld      (_sav_w), a
+    ld      a, SAV_H_ROWS
+    ld      (_sav_h), a
+
+    ld      a, SAV_H_ROWS
+    ld      b, a
+    ld      de, _sav_buf       ; dest = save buffer
+
+    ; Need a local copy of Y since we increment it
+    ld      a, (_gs_plane_y)
+    ld      c, a               ; C = current Y
+
+ps_row:
+    push    bc
+
+    ; Compute VRAM addr: C * 128 + _sav_x_byte
+    ld      a, c
+    srl     a
+    ld      h, a
+    ld      a, c
+    rrca
+    and     $80
+    ld      l, a
+    ld      a, (_sav_x_byte)
+    add     a, l
+    ld      l, a
+    jr      nc, ps_noc
+    inc     h
+ps_noc:
+    ; HL = VRAM source, DE = buffer dest
+    ld      bc, SAV_W_BYTES
+    ldir                       ; copy VRAM → buffer
+
+    pop     bc
+    ld      a, c
+    inc     a                  ; next row (wraps 255→0)
+    ld      c, a
+    djnz    ps_row
+
+    ; Mark buffer valid
+    ld      a, 1
+    ld      (_sav_valid), a
+    ret
+
+; ============================================================
+; draw_plane_sprite — table-driven sprite draw
+; Input: HL = pointer to sprite data (count byte + rect data)
+;        Uses _gs_plane_x, _gs_plane_y, _gs_plane_col
+; ============================================================
+draw_plane_sprite:
+    ld      a, (hl)            ; count
+    ld      b, a
+    inc     hl
+dps_loop:
+    push    bc
+    push    hl
+
+    ; dx → gfx_x1
+    ld      a, (_gs_plane_x)
+    add     a, (hl)
+    ld      (_gfx_x1), a
+    inc     hl
+
+    ; dy → gfx_y1
+    ld      a, (_gs_plane_y)
+    add     a, (hl)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    inc     hl
+
+    ; w → gfx_width
+    ld      a, (hl)
+    ld      (_gfx_width), a
+    inc     hl
+
+    ; h → gfx_height
+    ld      a, (hl)
+    ld      (_gfx_height), a
+
+    ; colour
+    ld      a, (_gs_plane_col)
+    ld      (_gfx_colour), a
+    call    gs_fill_rect
+
+    pop     hl
+    ld      bc, 4
+    add     hl, bc             ; advance to next rect
+    pop     bc
+    djnz    dps_loop
+    ret
+
+; ============================================================
 ; vid_game_step_asm — combined river + HUD + plane in ONE bank switch
 ; Params: _riv_y/left/right/land_col/water_col (river line)
 ;         _gs_hud_sep_y, _gs_hud_top_y, _gs_hud_col (HUD repair)
-;         _gs_plane_x, _gs_plane_y, _gs_plane_col (plane sprite)
+;         _gs_plane_x, _gs_plane_y, _gs_plane_col, _gs_plane_pose
 ; ============================================================
 _vid_game_step_asm:
     ; Set up river y
@@ -606,149 +957,147 @@ gs_no_right:
     ld      (_gfx_colour), a
     call    hline_raw
 
-    ; === PLANE: erase 16x14 bounding box with water colour (2px margin for movement) ===
-    ld      a, (_gs_plane_x)
-    sub     2                  ; 2px left margin
-    jr      nc, gs_px_ok
-    xor     a                  ; clamp to 0
-gs_px_ok:
-    ld      (_gfx_x1), a
-    ld      a, (_gs_plane_y)
-    ld      (_gfx_y1), a
-    xor     a
-    ld      (_gfx_y1+1), a
-    ld      a, 16
-    ld      (_gfx_width), a
+    ; === Scroll adjustment: always increment sav_y (accumulates across calls) ===
+    ld      a, (_sav_y)
+    inc     a
+    ld      (_sav_y), a
+
+    ; === Check if plane operations are needed this step ===
+    ld      a, (_gs_do_plane)
+    or      a
+    jr      z, gs_skip_plane
+
+    ; === PLANE: restore saved background (erase old sprite) ===
+    call    plane_restore
+
+    ; === PLANE: save new background before drawing ===
+    call    plane_save
+
+    ; === PLANE SPRITE — table-driven, selected by pose ===
+    ld      a, (_gs_plane_pose)
+    or      a
+    jr      z, gs_pose_fwd
+    cp      1
+    jr      z, gs_pose_left
+    ld      hl, spr_right_data
+    jr      gs_pose_draw
+gs_pose_fwd:
+    ld      hl, spr_fwd_data
+    jr      gs_pose_draw
+gs_pose_left:
+    ld      hl, spr_left_data
+gs_pose_draw:
+    call    draw_plane_sprite
+
+gs_skip_plane:
+    call    swapgfxbk1
+    ret
+
+; ============================================================
+; vid_game_frame_asm — batched: N scroll steps + HUD + plane
+; in ONE bank switch.  Pre-fill _step_buf from C before calling.
+; Entry layout per step (6 bytes):
+;   [0] scroll_val  [1] riv_left  [2] riv_right
+;   [3] fuel_active [4] fuel_x   [5] fuel_row
+; ============================================================
+_vid_game_frame_asm:
+    call    swapgfxbk
+
+    ld      hl, _step_buf
+    ld      (_step_ptr), hl
+    ld      a, (_step_count)
+    ld      b, a
+    or      a
+    jp      z, gf_no_steps
+
+gf_step_loop:
+    push    bc
+    ld      hl, (_step_ptr)
+
+    ; Set scroll register (port I/O — works during VRAM bank-in)
     ld      a, 14
-    ld      (_gfx_height), a
-    ld      a, (_riv_water_col)
-    ld      (_gfx_colour), a
-    call    gs_fill_rect
+    out     ($16), a
+    ld      a, (hl)
+    out     ($17), a
+    inc     hl
 
-    ; === PLANE SPRITE (forward, 7 rects) ===
-    ; Rect 1: nose — dx=5, dy=0, w=2, h=2
-    ld      a, (_gs_plane_x)
-    add     a, 5
-    ld      (_gfx_x1), a
-    ld      a, (_gs_plane_y)
-    ld      (_gfx_y1), a
-    xor     a
-    ld      (_gfx_y1+1), a
-    ld      a, 2
-    ld      (_gfx_width), a
-    ld      a, 2
-    ld      (_gfx_height), a
-    ld      a, (_gs_plane_col)
-    ld      (_gfx_colour), a
-    call    gs_fill_rect
+    ; Load river params
+    ld      a, (hl)
+    ld      (_riv_left), a
+    inc     hl
+    ld      a, (hl)
+    ld      (_riv_right), a
+    inc     hl
 
-    ; Rect 2: upper body — dx=4, dy=2, w=4, h=2
-    ld      a, (_gs_plane_x)
-    add     a, 4
-    ld      (_gfx_x1), a
-    ld      a, (_gs_plane_y)
-    add     a, 2
-    ld      (_gfx_y1), a
-    xor     a
-    ld      (_gfx_y1+1), a
-    ld      a, 4
-    ld      (_gfx_width), a
-    ld      a, 2
-    ld      (_gfx_height), a
-    call    gs_fill_rect
+    ; Load fuel params
+    ld      a, (hl)
+    ld      (_gs_blit_active), a
+    inc     hl
+    ld      a, (hl)
+    ld      (_gs_blit_x), a
+    inc     hl
+    ld      a, (hl)
+    ld      (_gs_blit_row), a
+    inc     hl
 
-    ; Rect 3: mid body — dx=2, dy=4, w=8, h=2
-    ld      a, (_gs_plane_x)
-    add     a, 2
-    ld      (_gfx_x1), a
-    ld      a, (_gs_plane_y)
-    add     a, 4
-    ld      (_gfx_y1), a
-    xor     a
-    ld      (_gfx_y1+1), a
-    ld      a, 8
-    ld      (_gfx_width), a
-    ld      a, 2
-    ld      (_gfx_height), a
-    call    gs_fill_rect
+    ld      (_step_ptr), hl
 
-    ; Rect 4: wings — dx=0, dy=6, w=12, h=2
-    ld      a, (_gs_plane_x)
-    ld      (_gfx_x1), a
-    ld      a, (_gs_plane_y)
-    add     a, 6
-    ld      (_gfx_y1), a
+    ; Draw at y=0 (newly exposed scanline)
     xor     a
-    ld      (_gfx_y1+1), a
-    ld      a, 12
-    ld      (_gfx_width), a
-    ld      a, 2
-    ld      (_gfx_height), a
-    call    gs_fill_rect
+    ld      (_riv_y), a
+    call    draw_river_fuel
 
-    ; Rect 5: lower body — dx=4, dy=8, w=4, h=2
-    ld      a, (_gs_plane_x)
-    add     a, 4
-    ld      (_gfx_x1), a
-    ld      a, (_gs_plane_y)
-    add     a, 8
-    ld      (_gfx_y1), a
-    xor     a
-    ld      (_gfx_y1+1), a
-    ld      a, 4
-    ld      (_gfx_width), a
-    ld      a, 2
-    ld      (_gfx_height), a
-    call    gs_fill_rect
+    ; Track scroll offset for save-under
+    ld      a, (_sav_y)
+    inc     a
+    ld      (_sav_y), a
 
-    ; Rect 6: left tail — dx=2, dy=10, w=2, h=2
-    ld      a, (_gs_plane_x)
-    add     a, 2
-    ld      (_gfx_x1), a
-    ld      a, (_gs_plane_y)
-    add     a, 10
-    ld      (_gfx_y1), a
-    xor     a
-    ld      (_gfx_y1+1), a
-    ld      a, 2
-    ld      (_gfx_width), a
-    ld      a, 2
-    ld      (_gfx_height), a
-    call    gs_fill_rect
+    pop     bc
+    djnz    gf_step_loop
 
-    ; Rect 7: right tail — dx=8, dy=10, w=2, h=2
-    ld      a, (_gs_plane_x)
-    add     a, 8
-    ld      (_gfx_x1), a
-    ld      a, (_gs_plane_y)
-    add     a, 10
-    ld      (_gfx_y1), a
+gf_no_steps:
+    ; === HUD REPAIR (once per frame) ===
     xor     a
-    ld      (_gfx_y1+1), a
-    ld      a, 2
-    ld      (_gfx_width), a
-    ld      a, 2
-    ld      (_gfx_height), a
-    call    gs_fill_rect
-
-    ; === CLEANUP: erase 1-line trail below plane (scroll bleed, wider for movement) ===
-    ld      a, (_gs_plane_x)
-    sub     2
-    jr      nc, gs_trail_ok
-    xor     a
-gs_trail_ok:
     ld      (_gfx_x1), a
-    ld      a, (_gs_plane_x)
-    add     a, 13              ; plane_x + PLANE_W + 2 - 1
+    ld      a, 255
     ld      (_gfx_x2), a
-    ld      a, (_gs_plane_y)
-    add     a, 12              ; plane_y + PLANE_H
+    ld      a, (_gs_hud_sep_y)
     ld      (_gfx_y1), a
     xor     a
     ld      (_gfx_y1+1), a
-    ld      a, (_riv_water_col)
     ld      (_gfx_colour), a
     call    hline_raw
+
+    xor     a
+    ld      (_gfx_x1), a
+    ld      a, 255
+    ld      (_gfx_x2), a
+    ld      a, (_gs_hud_top_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_hud_col)
+    ld      (_gfx_colour), a
+    call    hline_raw
+
+    ; === PLANE ===
+    call    plane_restore
+    call    plane_save
+
+    ld      a, (_gs_plane_pose)
+    or      a
+    jr      z, gf_pose_fwd
+    cp      1
+    jr      z, gf_pose_left
+    ld      hl, spr_right_data
+    jr      gf_pose_draw
+gf_pose_fwd:
+    ld      hl, spr_fwd_data
+    jr      gf_pose_draw
+gf_pose_left:
+    ld      hl, spr_left_data
+gf_pose_draw:
+    call    draw_plane_sprite
 
     call    swapgfxbk1
     ret

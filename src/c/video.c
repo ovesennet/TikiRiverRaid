@@ -12,6 +12,7 @@ extern void vid_fill_rect_gfx(void);
 extern void vid_draw_text_gfx(void);
 extern void vid_draw_river_line_asm(void);
 extern void vid_game_step_asm(void);
+extern void vid_game_frame_asm(void);
 extern void vid_begin_vram_asm(void);
 extern void vid_end_vram_asm(void);
 extern void vid_hline_nr_asm(void);
@@ -45,6 +46,7 @@ extern uint8_t  riv_water_col;
 extern uint8_t  gs_plane_x;
 extern uint8_t  gs_plane_y;
 extern uint8_t  gs_plane_col;
+extern uint8_t  gs_plane_pose;
 extern uint8_t  gs_hud_sep_y;
 extern uint8_t  gs_hud_top_y;
 extern uint8_t  gs_hud_col;
@@ -52,6 +54,9 @@ extern uint8_t  gs_hud_col;
 extern uint8_t  gs_blit_active;
 extern uint8_t  gs_blit_x;
 extern uint8_t  gs_blit_row;
+
+extern uint8_t  step_buf[];
+extern uint8_t  step_count;
 
 extern uint8_t  scroll_val;
 
@@ -144,6 +149,21 @@ void vid_set_blit(uint8_t active, uint8_t x, uint8_t row)
     gs_blit_active = active;
     gs_blit_x = x;
     gs_blit_row = row;
+}
+
+void vid_set_plane_pose(uint8_t pose)
+{
+    gs_plane_pose = pose;
+}
+
+void vid_game_frame(uint8_t num_steps,
+                    uint8_t plane_x, uint8_t plane_y, uint8_t plane_col)
+{
+    step_count = num_steps;
+    gs_plane_x = plane_x;
+    gs_plane_y = plane_y;
+    gs_plane_col = plane_col;
+    vid_game_frame_asm();
 }
 
 void vid_begin_vram(void) { vid_begin_vram_asm(); }

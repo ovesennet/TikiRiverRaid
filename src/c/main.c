@@ -11,6 +11,8 @@
 #include "river.h"
 
 extern uint8_t kbd_scan(void);
+extern uint8_t sav_valid;
+extern uint8_t gs_do_plane;
 
 /* Fuel barrel constants */
 #define FUEL_W  14
@@ -150,8 +152,8 @@ static uint8_t plane_x;
 static uint8_t gl_left, gl_right;
 static uint16_t gl_y;
 static uint8_t gl_scroll_reg;
-static uint8_t gl_input_ctr;
 static uint8_t gl_keys;
+static uint8_t gl_input_ctr;
 
 #define MOVE_SPEED 3
 
@@ -162,6 +164,7 @@ static void game_loop(void)
     scroll_set(0);
     scroll_speed = SCROLL_SPEED_DEFAULT;
     plane_x = PLANE_START_X;
+    sav_valid = 0;
 
     /* Init river with game seed */
     river_init(RNG_SEED);
@@ -175,16 +178,15 @@ static void game_loop(void)
         vid_draw_river_line((uint8_t)(SCREEN_H - 1 - gl_y), gl_left, gl_right);
     }
 
-    /* Draw initial HUD and plane */
+    /* Draw initial HUD — plane will be drawn by first vid_game_step */
     draw_hud();
-    draw_sprite(plane_x, PLANE_Y, spr_plane_fwd, SPR_FWD_COUNT, COL_YELLOW);
 
     gl_scroll_reg = 0;
     gl_keys = 0;
     gl_input_ctr = 0;
 
     for (;;) {
-        /* Poll input every 4 scroll lines (~50-60 Hz) */
+        /* Poll input every 4 scroll lines */
         gl_input_ctr++;
         if (gl_input_ctr >= 4) {
             gl_input_ctr = 0;
@@ -193,14 +195,21 @@ static void game_loop(void)
             if (gl_keys & KBIT_LEFT) {
                 if (plane_x >= MOVE_SPEED)
                     plane_x -= MOVE_SPEED;
-            }
-            if (gl_keys & KBIT_RIGHT) {
+                vid_set_plane_pose(POSE_LEFT);
+            } else if (gl_keys & KBIT_RIGHT) {
                 if (plane_x <= (uint8_t)(244 - MOVE_SPEED))
                     plane_x += MOVE_SPEED;
+                vid_set_plane_pose(POSE_RIGHT);
+            } else {
+                vid_set_plane_pose(POSE_FWD);
             }
 
             if (gl_keys & KBIT_QUIT)
                 break;
+
+            gs_do_plane = 1;
+        } else {
+            gs_do_plane = 0;
         }
 
         /* Scroll 1 line */
@@ -208,7 +217,7 @@ static void game_loop(void)
         scroll_set(gl_scroll_reg);
         river_generate_line(&gl_left, &gl_right);
 
-        /* Fuel barrel: first FUEL_H steps = draw rows, rest = gap */
+        /* Fuel barrel */
         if (fuel_step < FUEL_H) {
             vid_set_blit(1, fuel_x, (uint8_t)fuel_step);
         } else {
@@ -221,10 +230,8 @@ static void game_loop(void)
         if (fuel_step >= (uint16_t)(FUEL_H + fuel_gap)) {
             uint8_t rnd, range;
             fuel_step = 0;
-            /* Random gap: 250-1250 lines (~1-5 sec) */
             rnd = frame_counter ^ gl_scroll_reg;
             fuel_gap = 250 + (uint16_t)(rnd & 0xFF) * 4;
-            /* Random X within river */
             range = gl_right - gl_left;
             if (range > FUEL_W + 4) {
                 fuel_x = gl_left + 2 + (rnd % (range - FUEL_W - 2));

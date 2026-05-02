@@ -56,7 +56,12 @@
 /* ── Player plane ──────────────────────────────────────────── */
 #define PLANE_W         12
 #define PLANE_H         12
-#define PLANE_Y         218    /* HUD_SEP_Y - 5 - PLANE_H */
+#define PLANE_Y         213    /* HUD_SEP_Y - 10 - PLANE_H */
 #define PLANE_START_X   122    /* (SCREEN_W - PLANE_W) / 2 */
+
+/* Plane sprite poses */
+#define POSE_FWD        0
+#define POSE_LEFT       1
+#define POSE_RIGHT      2
 
 #endif /* DEFS_H */

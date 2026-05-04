@@ -54,7 +54,8 @@ $cFiles = @(
     "$SrcDir\main.c",
     "$SrcDir\video.c",
     "$SrcDir\input.c",
-    "$SrcDir\river.c"
+    "$SrcDir\river.c",
+    "$SrcDir\sound.c"
 )
 
 # Assembly source files

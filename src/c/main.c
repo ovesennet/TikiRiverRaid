@@ -9,6 +9,7 @@
 #include "video.h"
 #include "input.h"
 #include "river.h"
+#include "sound.h"
 
 extern uint8_t kbd_scan(void);
 extern uint8_t sav_valid;
@@ -335,6 +336,8 @@ restart:
     enemy_killed = 0;
     explode_timer = 0;
 
+    snd_engine_on();
+
     for (;;) {
         /* Input once per batch */
         gl_keys = kbd_scan();
@@ -351,14 +354,17 @@ restart:
             vid_set_plane_pose(POSE_FWD);
         }
 
-        if (gl_keys & KBIT_QUIT)
+        if (gl_keys & KBIT_QUIT) {
+            snd_engine_off();
             break;
+        }
 
         /* Fire rocket */
         if ((gl_keys & KBIT_FIRE) && !rocket_prev_fired && !rocket_active) {
             rocket_active = 1;
             rocket_x = (plane_x + (PLANE_W / 2) - (ROCKET_W / 2)) & 0xFE;
             rocket_vy = PLANE_Y;  /* starts at plane top */
+            snd_shoot();
         }
         rocket_prev_fired = (gl_keys & KBIT_FIRE) ? 1 : 0;
 
@@ -448,6 +454,7 @@ restart:
                 if (plane_x + PLANE_W > fuel_x && plane_x < fuel_x + FUEL_W) {
                     fuel = fuel + FUEL_PICKUP;
                     if (fuel > FUEL_FULL) fuel = FUEL_FULL;
+                    snd_refuel();
                     fuel_step = (uint16_t)(PLANE_Y + PLANE_H + FUEL_H);
                     fuel_row = FUEL_H;
                     score += 100;
@@ -535,6 +542,7 @@ restart:
                         explode_w = enemy_w;
                         explode_h = (uint8_t)(enemy_step - et + scroll_speed);
                         explode_timer = EXPLODE_FRAMES;
+                        snd_explode();
                         score += 200;
                         enemy_killed = 1;
                         enemy_step = (uint16_t)(PLANE_Y + PLANE_H + enemy_h);
@@ -563,6 +571,7 @@ restart:
                         explode_w = FUEL_W;
                         explode_h = fh;
                         explode_timer = EXPLODE_FRAMES;
+                        snd_explode();
                         score += 80;
                         fuel_step = (uint16_t)(PLANE_Y + PLANE_H + FUEL_H);
                         fuel_row = FUEL_H;
@@ -593,6 +602,8 @@ restart:
             }
         }
 
+        snd_update();
+
         /* Fuel: deplete 1 per batch (empty in ~30s at 50Hz) */
         if (fuel > 0)
             fuel--;
@@ -616,6 +627,8 @@ restart:
         continue;
 
 crash:
+        snd_engine_off();
+        snd_crash();
         /* Stop scroll, draw scattered explosion dots over plane and enemy */
         {
             uint8_t cx, cy;
@@ -675,8 +688,15 @@ crash:
                 vid_fill_rect(crash_ex + 8, (uint8_t)(crash_ey + 7), 1, 1, COL_YELLOW);
             }
 
-            /* Hold for ~1 second */
-            delay(60000);
+            /* Hold for ~1 second, ticking sound each frame */
+            {
+                uint8_t wait;
+                for (wait = 0; wait < 50; wait++) {
+                    snd_update();
+                    delay(1200);
+                }
+            }
+            sound_off();
         }
 
         if (lives > 1) {
@@ -705,6 +725,7 @@ int main(void)
 {
     vid_init();
     input_init();
+    sound_init();
 
     while (1) {
         if (!title_screen())
@@ -714,6 +735,7 @@ int main(void)
 
     vid_shutdown();
     input_shutdown();
+    sound_off();
 
     return 0;
 }

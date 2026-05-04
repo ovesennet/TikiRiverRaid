@@ -220,9 +220,10 @@ static uint8_t title_screen(void)
 /* ── Game loop with vertical scrolling river ── */
 static uint8_t scroll_speed;
 
-/* Fuel barrel — single counter approach */
+/* Fuel barrel — split position (fuel_step) from draw row (fuel_row) */
 static uint8_t fuel_x;
-static uint16_t fuel_step;
+static uint16_t fuel_step;     /* total scroll steps since barrel spawned (position) */
+static uint8_t fuel_row;       /* next sprite row to draw (0..FUEL_H-1) */
 static uint16_t fuel_gap;
 
 /* Enemy — same counter approach as fuel */
@@ -246,6 +247,25 @@ static uint8_t rng_next(void) {
 static uint8_t hit_flash;      /* >0: invulnerability frames after hit */
 static uint8_t crash_enemy;    /* 1 = crashed into enemy, draw enemy explosion too */
 static uint8_t crash_ex, crash_ey, crash_ew, crash_eh; /* enemy pos at crash */
+static uint8_t enemy_killed;   /* 1 = enemy destroyed by rocket, skip plane collision */
+
+/* Explosion display timer */
+#define EXPLODE_FRAMES 25      /* ~500ms at 50Hz */
+static uint8_t explode_timer;   /* >0: explosion visible, counts down */
+static uint8_t explode_x;       /* screen X of explosion area */
+static uint8_t explode_y;       /* screen Y of explosion top */
+static uint8_t explode_w;       /* width to erase */
+static uint8_t explode_h;       /* height to erase */
+
+/* Rocket */
+static uint8_t rocket_active;  /* 1 = rocket on screen */
+static uint8_t rocket_x;       /* VRAM X of rocket */
+static uint8_t rocket_vy;      /* VRAM Y of rocket top */
+static uint8_t rocket_prev_fired; /* debounce: was fire held last frame */
+
+#define ROCKET_W  2
+#define ROCKET_H  8
+#define ROCKET_SPEED 20  /* pixels per frame upward */
 
 /* River bank edge storage — indexed by VRAM row (ring buffer) */
 static uint8_t bank_l[256];    /* left edge per VRAM row */
@@ -284,6 +304,7 @@ restart:
     /* Init river with game seed */
     river_init(RNG_SEED);
     fuel_step = 0;
+    fuel_row = 0;
     fuel_x = 100;
     fuel_gap = 500;
     enemy_step = (uint16_t)(PLANE_Y + PLANE_H + HELI_H);
@@ -309,6 +330,10 @@ restart:
     gl_keys = 0;
     gl_input_ctr = 0;
     hud_timer = 0;
+    rocket_active = 0;
+    rocket_prev_fired = 0;
+    enemy_killed = 0;
+    explode_timer = 0;
 
     for (;;) {
         /* Input once per batch */
@@ -329,6 +354,14 @@ restart:
         if (gl_keys & KBIT_QUIT)
             break;
 
+        /* Fire rocket */
+        if ((gl_keys & KBIT_FIRE) && !rocket_prev_fired && !rocket_active) {
+            rocket_active = 1;
+            rocket_x = (plane_x + (PLANE_W / 2) - (ROCKET_W / 2)) & 0xFE;
+            rocket_vy = PLANE_Y;  /* starts at plane top */
+        }
+        rocket_prev_fired = (gl_keys & KBIT_FIRE) ? 1 : 0;
+
         /* Batch scroll_speed steps per vblank */
         for (gl_input_ctr = 0; gl_input_ctr < scroll_speed; gl_input_ctr++) {
             gl_scroll_reg--;
@@ -343,9 +376,9 @@ restart:
             if (enemy_step < enemy_h) {
                 vid_set_blit_type(enemy_type);
                 vid_set_blit(1, enemy_x, (uint8_t)enemy_step);
-            } else if (fuel_step < FUEL_H) {
+            } else if (fuel_row < FUEL_H) {
                 vid_set_blit_type(BLIT_FUEL);
-                vid_set_blit(1, fuel_x, (uint8_t)fuel_step);
+                vid_set_blit(1, fuel_x, fuel_row);
             } else {
                 vid_set_blit(0, 0, 0);
             }
@@ -355,13 +388,18 @@ restart:
 
             vid_game_step(gl_scroll_reg, 0, gl_left, gl_right, plane_x, PLANE_Y, COL_YELLOW);
 
-            /* Advance fuel counter — pause while enemy is drawing */
-            if (enemy_step >= enemy_h) {
+            /* Advance fuel draw row (only when actually blitting) */
+            if (enemy_step >= enemy_h && fuel_row < FUEL_H) {
+                fuel_row++;
+            }
+
+            /* Always advance fuel position counter (tracks scrolling) */
             fuel_step++;
             if (fuel_step >= (uint16_t)(FUEL_H + fuel_gap)
                 && enemy_step >= (uint16_t)(enemy_h + FUEL_H + 20)) {
                 uint8_t rnd, range;
                 fuel_step = 0;
+                fuel_row = 0;
                 rnd = frame_counter ^ gl_scroll_reg;
                 fuel_gap = 250 + (uint16_t)(rnd & 0xFF) * 4;
                 range = gl_right - gl_left;
@@ -372,7 +410,6 @@ restart:
                 }
                 fuel_x = fuel_x & 0xFE;
             }
-            } /* end if enemy not drawing */
 
             /* Advance enemy counter — reset after passing plane + gap */
             enemy_step++;
@@ -380,6 +417,7 @@ restart:
                 && fuel_step >= (uint16_t)(FUEL_H + FUEL_H + 20)) {
                 uint8_t rnd, range;
                 enemy_step = 0;
+                enemy_killed = 0;
                 rnd = rng_next();
                 /* Random heli/boat selection */
                 if (rnd & 0x01) {
@@ -403,13 +441,15 @@ restart:
 
             /* --- Per-step collision checks (instant response) --- */
 
-            /* Barrel collision */
-            if (fuel_step >= (uint16_t)PLANE_Y &&
-                fuel_step <= (uint16_t)(PLANE_Y + PLANE_H + FUEL_H - 2)) {
+            /* Barrel collision (pickup) */
+            if (fuel_row > 0 &&
+                fuel_step >= (uint16_t)PLANE_Y &&
+                fuel_step <= (uint16_t)(PLANE_Y + PLANE_H + fuel_row - 1)) {
                 if (plane_x + PLANE_W > fuel_x && plane_x < fuel_x + FUEL_W) {
                     fuel = fuel + FUEL_PICKUP;
                     if (fuel > FUEL_FULL) fuel = FUEL_FULL;
                     fuel_step = (uint16_t)(PLANE_Y + PLANE_H + FUEL_H);
+                    fuel_row = FUEL_H;
                     score += 100;
                 }
             }
@@ -417,34 +457,141 @@ restart:
             /* River bank collision */
             if (hit_flash == 0) {
                 uint8_t bl, br;
-                bl = bank_l[PLANE_Y];
-                br = bank_r[PLANE_Y];
+                bl = bank_l[(uint8_t)(PLANE_Y + gl_scroll_reg)];
+                br = bank_r[(uint8_t)(PLANE_Y + gl_scroll_reg)];
                 if (plane_x < bl || (plane_x + PLANE_W) > br) {
                     crash_enemy = 0;
                     goto crash;
                 }
             }
 
-            /* Enemy collision */
-            if (hit_flash == 0 &&
+            /* Enemy collision — skip if already killed by rocket */
+            if (hit_flash == 0 && !enemy_killed &&
                 enemy_step >= (uint16_t)PLANE_Y &&
                 enemy_step <= (uint16_t)(PLANE_Y + PLANE_H + enemy_h - 2)) {
                 if (plane_x + PLANE_W > enemy_x && plane_x < enemy_x + enemy_w) {
-                    score += 200;
                     crash_enemy = 1;
                     crash_ex = enemy_x;
                     crash_ew = enemy_w;
                     crash_eh = enemy_h + 4;
-                    /* Enemy top VRAM row = scroll_reg + step - h, with margin */
-                    crash_ey = (uint8_t)(gl_scroll_reg + (uint8_t)enemy_step - enemy_h - 2);
+                    /* Enemy top screen Y = enemy_step - enemy_h */
+                    crash_ey = (uint8_t)((uint8_t)enemy_step - enemy_h);
                     enemy_step = (uint16_t)(PLANE_Y + PLANE_H + enemy_h);
                     goto crash;
                 }
             }
         }
 
-        /* Score: +10 per batch */
-        score += 10;
+        /* Move and draw rocket */
+        if (rocket_active) {
+            uint8_t ri;
+            /* Check if rocket reached top of screen (prevent uint8 wrap) */
+            if (rocket_vy < ROCKET_SPEED) {
+                /* Erase old position (shifted down by scroll) and deactivate */
+                for (ri = 0; ri < ROCKET_H + scroll_speed; ri++) {
+                    vid_fill_rect(rocket_x, (uint8_t)(rocket_vy + ri), ROCKET_W, 1, COL_BLUE);
+                }
+                rocket_active = 0;
+            } else {
+                /* Move up */
+                rocket_vy = (uint8_t)(rocket_vy - ROCKET_SPEED);
+                /* Erase from new top to old bottom + scroll shift */
+                {
+                    uint8_t erase_len;
+                    erase_len = ROCKET_H + ROCKET_SPEED + scroll_speed;
+                    for (ri = 0; ri < erase_len; ri++) {
+                        vid_fill_rect(rocket_x, (uint8_t)(rocket_vy + ri), ROCKET_W, 1, COL_BLUE);
+                    }
+                }
+                /* Rocket vs river bank — disappear if hitting green */
+                {
+                    uint8_t rl, rr;
+                    rl = bank_l[(uint8_t)(rocket_vy + gl_scroll_reg)];
+                    rr = bank_r[(uint8_t)(rocket_vy + gl_scroll_reg)];
+                    if (rocket_x < rl || (rocket_x + ROCKET_W) > rr) {
+                        rocket_active = 0;
+                    }
+                }
+                /* Rocket-enemy collision: enemy on screen & Y/X overlap */
+                if (rocket_active && enemy_step > 0 &&
+                    (uint16_t)rocket_vy < enemy_step &&
+                    enemy_step < (uint16_t)(rocket_vy + ROCKET_H + enemy_h)) {
+                    if (rocket_x + ROCKET_W > enemy_x && rocket_x < enemy_x + enemy_w) {
+                        /* Hit! Erase enemy area and draw explosion dots */
+                        uint8_t et, ei;
+                        et = (enemy_step >= enemy_h) ? (uint8_t)(enemy_step - enemy_h) : 0;
+                        /* Erase full object + scroll margin */
+                        for (ei = 0; ei < (uint8_t)(enemy_step - et + scroll_speed); ei++) {
+                            vid_fill_rect(enemy_x, (uint8_t)(et + ei), enemy_w, 1, COL_BLUE);
+                        }
+                        vid_fill_rect(enemy_x + 2, (uint8_t)(et + 1), 1, 1, COL_YELLOW);
+                        vid_fill_rect(enemy_x + 5, (uint8_t)(et + 2), 2, 1, COL_BRRED);
+                        vid_fill_rect(enemy_x + 1, (uint8_t)(et + 3), 1, 1, COL_YELLOW);
+                        vid_fill_rect(enemy_x + 3, (uint8_t)(et + 4), 2, 1, COL_BRRED);
+                        vid_fill_rect(enemy_x + 6, (uint8_t)(et + 5), 1, 1, COL_YELLOW);
+                        /* Save explosion area for timed cleanup */
+                        explode_x = enemy_x;
+                        explode_y = et;
+                        explode_w = enemy_w;
+                        explode_h = (uint8_t)(enemy_step - et + scroll_speed);
+                        explode_timer = EXPLODE_FRAMES;
+                        score += 200;
+                        enemy_killed = 1;
+                        enemy_step = (uint16_t)(PLANE_Y + PLANE_H + enemy_h);
+                        rocket_active = 0;
+                    }
+                }
+                /* Rocket-fuel collision: fuel on screen & Y/X overlap */
+                if (rocket_active && fuel_row > 0 &&
+                    (uint16_t)rocket_vy < fuel_step &&
+                    fuel_step < (uint16_t)(rocket_vy + ROCKET_H + fuel_row)) {
+                    if (rocket_x + ROCKET_W > fuel_x && rocket_x < fuel_x + FUEL_W) {
+                        /* Hit fuel barrel — erase full drawn area */
+                        uint8_t ft, fi, fh;
+                        ft = (uint8_t)(fuel_step - fuel_row);
+                        fh = (uint8_t)(fuel_row + scroll_speed);
+                        for (fi = 0; fi < fh; fi++) {
+                            vid_fill_rect(fuel_x, (uint8_t)(ft + fi), FUEL_W, 1, COL_BLUE);
+                        }
+                        /* Small explosion dots */
+                        vid_fill_rect(fuel_x + 2, (uint8_t)(ft + 1), 1, 1, COL_YELLOW);
+                        vid_fill_rect(fuel_x + 5, (uint8_t)(ft + 3), 2, 1, COL_BRRED);
+                        vid_fill_rect(fuel_x + 1, (uint8_t)(ft + 5), 1, 1, COL_YELLOW);
+                        /* Save explosion area for timed cleanup */
+                        explode_x = fuel_x;
+                        explode_y = ft;
+                        explode_w = FUEL_W;
+                        explode_h = fh;
+                        explode_timer = EXPLODE_FRAMES;
+                        score += 80;
+                        fuel_step = (uint16_t)(PLANE_Y + PLANE_H + FUEL_H);
+                        fuel_row = FUEL_H;
+                        rocket_active = 0;
+                    }
+                }
+                /* Draw at new position */
+                if (rocket_active) {
+                    for (ri = 0; ri < ROCKET_H; ri++) {
+                        vid_fill_rect(rocket_x, (uint8_t)(rocket_vy + ri), ROCKET_W, 1, COL_YELLOW);
+                    }
+                }
+            }
+        }
+
+        /* Explosion cleanup timer */
+        if (explode_timer > 0) {
+            /* Drift position with scroll (skip first frame — no scroll since draw) */
+            if (explode_timer < EXPLODE_FRAMES) {
+                explode_y = (uint8_t)(explode_y + scroll_speed);
+            }
+            explode_timer--;
+            if (explode_timer == 0) {
+                uint8_t ei;
+                for (ei = 0; ei < explode_h; ei++) {
+                    vid_fill_rect(explode_x, (uint8_t)(explode_y + ei), explode_w, 1, COL_BLUE);
+                }
+            }
+        }
 
         /* Fuel: deplete 1 per batch (empty in ~30s at 50Hz) */
         if (fuel > 0)

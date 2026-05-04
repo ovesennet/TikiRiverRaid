@@ -30,6 +30,7 @@
     PUBLIC  _wait_vsync_asm
     PUBLIC  _vsync_init_asm
     PUBLIC  _vsync_shutdown_asm
+    PUBLIC  _hud_snapshot_asm
 
     EXTERN  swapgfxbk
     EXTERN  swapgfxbk1
@@ -112,11 +113,13 @@ _gs_hud_col:   defs 1
     PUBLIC  _gs_blit_active
     PUBLIC  _gs_blit_x
     PUBLIC  _gs_blit_row
+    PUBLIC  _gs_blit_type
     PUBLIC  _gs_do_plane
 
 _gs_blit_active: defs 1
 _gs_blit_x:      defs 1
 _gs_blit_row:    defs 1
+_gs_blit_type:   defs 1        ; 0=fuel, 1=heli, 2=boat
 _gs_do_plane:    defs 1
 
     PUBLIC  _gs_scroll_reg
@@ -160,6 +163,14 @@ _sav_scroll:   defs 1          ; scroll_reg value at time of last save
 _step_buf:     defs 48         ; 8 entries × 6 bytes (scroll,left,right,fuel_act,fuel_x,fuel_row)
 _step_count:   defs 1
 _step_ptr:     defs 2          ; internal scratch pointer
+
+; ── HUD framebuffer: pre-rendered in RAM, LDIR'd to VRAM each step ──
+HUD_BUF_ROWS equ 12            ; must match HUD_HEIGHT in defs.h
+HUD_BUF_SIZE equ HUD_BUF_ROWS * 128
+HUD_TOP      equ 244           ; must match HUD_TOP in defs.h
+
+    PUBLIC  _hud_buf
+_hud_buf:      defs HUD_BUF_SIZE   ; 1536 bytes
 
     SECTION code_graphics
 
@@ -836,7 +847,7 @@ gs_no_left:
     ld      (_gfx_y1+1), a
     call    hline_raw
 
-    ; === FUEL SPRITE on water (if active) — 14x24 barrel ===
+    ; === OBJECT SPRITE on water (if active) ===
     ld      a, (_gs_blit_active)
     or      a
     jp      z, gs_no_fuel
@@ -847,6 +858,16 @@ gs_no_left:
     xor     a
     ld      (_gfx_y1+1), a
 
+    ; Dispatch by blit_type: 0=fuel, 1=heli, 2=boat
+    ld      a, (_gs_blit_type)
+    or      a
+    jp      z, gs_draw_fuel
+    cp      1
+    jp      z, gs_draw_heli
+    jp      gs_draw_boat
+
+    ; ── FUEL BARREL (14x24) ──
+gs_draw_fuel:
     ; Rows 0,1,22,23 = narrow cap (x+3..x+10)
     ; Rows 2-21 = wide body (x+1..x+12)
     ; White bands on rows 5,6,7 and 16,17,18: x+3..x+10
@@ -919,6 +940,330 @@ gs_fuel_done:
     xor     a
     ld      (_gs_blit_active), a
 
+    jp      gs_no_fuel
+
+    ; ── HELICOPTER (16x10) — Y=Yellow(6), G=Green(2), L=LtGrey(7) ──
+    ; Reversed for downward scroll (row 0 drawn first = bottom on screen)
+    ; R0: ........GGGGGG..   G x+8..x+13   (was R9)
+    ; R1: ..........GG....   G x+10..x+11  (was R8)
+    ; R2: GG......GGGGGG..   G x+0..x+1, G x+8..x+13  (was R7)
+    ; R3: LLLLLLLLLLLLLLLL   L x+0..x+15   (was R6)
+    ; R4: LLLLLLLLLLLLLLLL   L x+0..x+15   (was R5)
+    ; R5: GG....GGGGGGGGGG   G x+0..x+1, G x+6..x+15  (was R4)
+    ; R6: ........GGGGGG..   G x+8..x+13   (was R3)
+    ; R7: ..........YY....   Y x+10..x+11  (was R2)
+    ; R8: ..........YYYYYY   Y x+10..x+15  (was R1)
+    ; R9: ......YYYYYY....   Y x+6..x+11   (was R0)
+gs_draw_heli:
+    ld      a, (_gs_blit_row)
+    ; Row 0: G x+8..x+13
+    or      a
+    jr      nz, gs_heli_r1
+    ld      a, (_gs_blit_x)
+    add     a, 8
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 13
+    ld      (_gfx_x2), a
+    ld      a, 2               ; COL_GREEN
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_heli_done
+gs_heli_r1:
+    cp      1
+    jr      nz, gs_heli_r2
+    ; G x+10..x+11
+    ld      a, (_gs_blit_x)
+    add     a, 10
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 11
+    ld      (_gfx_x2), a
+    ld      a, 2               ; COL_GREEN
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_heli_done
+gs_heli_r2:
+    cp      2
+    jr      nz, gs_heli_r3
+    ; G x+0..x+1 (tail)
+    ld      a, (_gs_blit_x)
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    inc     a
+    ld      (_gfx_x2), a
+    ld      a, 2               ; COL_GREEN
+    ld      (_gfx_colour), a
+    call    hline_raw
+    ; G x+8..x+13 (body)
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_blit_x)
+    add     a, 8
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 13
+    ld      (_gfx_x2), a
+    ld      a, 2               ; COL_GREEN
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_heli_done
+gs_heli_r3:
+    cp      3
+    jr      nz, gs_heli_r4
+    ; L x+0..x+15 (full width)
+    ld      a, (_gs_blit_x)
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 15
+    ld      (_gfx_x2), a
+    ld      a, 7               ; COL_LTGREY
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_heli_done
+gs_heli_r4:
+    cp      4
+    jr      nz, gs_heli_r5
+    ; L x+0..x+15 (full width)
+    ld      a, (_gs_blit_x)
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 15
+    ld      (_gfx_x2), a
+    ld      a, 7               ; COL_LTGREY
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_heli_done
+gs_heli_r5:
+    cp      5
+    jr      nz, gs_heli_r6
+    ; G x+0..x+1 (tail)
+    ld      a, (_gs_blit_x)
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    inc     a
+    ld      (_gfx_x2), a
+    ld      a, 2               ; COL_GREEN
+    ld      (_gfx_colour), a
+    call    hline_raw
+    ; G x+6..x+15 (body)
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_blit_x)
+    add     a, 6
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 15
+    ld      (_gfx_x2), a
+    ld      a, 2               ; COL_GREEN
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_heli_done
+gs_heli_r6:
+    cp      6
+    jr      nz, gs_heli_r7
+    ; G x+8..x+13
+    ld      a, (_gs_blit_x)
+    add     a, 8
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 13
+    ld      (_gfx_x2), a
+    ld      a, 2               ; COL_GREEN
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_heli_done
+gs_heli_r7:
+    cp      7
+    jr      nz, gs_heli_r8
+    ; Y x+10..x+11
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_blit_x)
+    add     a, 10
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 11
+    ld      (_gfx_x2), a
+    ld      a, 6               ; COL_BRYELLOW
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_heli_done
+gs_heli_r8:
+    cp      8
+    jr      nz, gs_heli_r9
+    ; Y x+10..x+15
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_blit_x)
+    add     a, 10
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 15
+    ld      (_gfx_x2), a
+    ld      a, 6               ; COL_BRYELLOW
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_heli_done
+gs_heli_r9:
+    cp      9
+    jr      nz, gs_heli_done
+    ; Y x+6..x+11
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_blit_x)
+    add     a, 6
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 11
+    ld      (_gfx_x2), a
+    ld      a, 6               ; COL_BRYELLOW
+    ld      (_gfx_colour), a
+    call    hline_raw
+gs_heli_done:
+    xor     a
+    ld      (_gs_blit_active), a
+    jp      gs_no_fuel
+
+    ; ── BOAT (32x8) — B=Black(0), R=Red(4), L=LtGrey(7) ──
+    ; Reversed for downward scroll (row 0 drawn first = bottom on screen)
+    ; R0: ........LLLLLLLLLLLLLLLLLLL.....   L x+8..x+26   (was R7)
+    ; R1: ........LLLLLLLLLLLLLLLLLLLLLLLL   L x+8..x+31   (was R6)
+    ; R2: ....RRRRRRRRRRRRRRRRRRRRRRRRRRRR   R x+4..x+31   (was R5)
+    ; R3: RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR   R x+0..x+31   (was R4)
+    ; R4: ............BBBBBBBBBBBBBBBB....   B x+12..x+27  (was R3)
+    ; R5: ................BBBBBBBB........   B x+16..x+23  (was R2)
+    ; R6: ................BBBB............   B x+16..x+19  (was R1)
+    ; R7: ................BBBB............   B x+16..x+19  (was R0)
+gs_draw_boat:
+    ld      a, (_gs_blit_row)
+    ; Row 0: L x+8..x+26
+    or      a
+    jr      nz, gs_boat_r1
+    ld      a, (_gs_blit_x)
+    add     a, 8
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 26
+    ld      (_gfx_x2), a
+    ld      a, 7               ; COL_LTGREY
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_boat_done
+gs_boat_r1:
+    cp      1
+    jr      nz, gs_boat_r2
+    ; L x+8..x+31
+    ld      a, (_gs_blit_x)
+    add     a, 8
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 31
+    ld      (_gfx_x2), a
+    ld      a, 7               ; COL_LTGREY
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_boat_done
+gs_boat_r2:
+    cp      2
+    jr      nz, gs_boat_r3
+    ; R x+4..x+31
+    ld      a, (_gs_blit_x)
+    add     a, 4
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 31
+    ld      (_gfx_x2), a
+    ld      a, 4               ; COL_RED
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_boat_done
+gs_boat_r3:
+    cp      3
+    jr      nz, gs_boat_r4
+    ; R x+0..x+31 (full width)
+    ld      a, (_gs_blit_x)
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 31
+    ld      (_gfx_x2), a
+    ld      a, 4               ; COL_RED
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_boat_done
+gs_boat_r4:
+    cp      4
+    jr      nz, gs_boat_r5
+    ; B x+12..x+27
+    ld      a, (_gs_blit_x)
+    add     a, 12
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 27
+    ld      (_gfx_x2), a
+    ld      a, 0               ; COL_BLACK
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_boat_done
+gs_boat_r5:
+    cp      5
+    jr      nz, gs_boat_r6
+    ; B x+16..x+23
+    ld      a, (_gs_blit_x)
+    add     a, 16
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 23
+    ld      (_gfx_x2), a
+    ld      a, 0               ; COL_BLACK
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_boat_done
+gs_boat_r6:
+    cp      6
+    jr      nz, gs_boat_r7
+    ; B x+16..x+19
+    ld      a, (_gs_blit_x)
+    add     a, 16
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 19
+    ld      (_gfx_x2), a
+    ld      a, 0               ; COL_BLACK
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_boat_done
+gs_boat_r7:
+    cp      7
+    jr      nz, gs_boat_done
+    ; B x+16..x+19
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_blit_x)
+    add     a, 16
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 19
+    ld      (_gfx_x2), a
+    ld      a, 0               ; COL_BLACK
+    ld      (_gfx_colour), a
+    call    hline_raw
+gs_boat_done:
+    xor     a
+    ld      (_gs_blit_active), a
+
 gs_no_fuel:
     ; Right bank: x=riv_right+1 to 255
     ld      a, (_riv_right)
@@ -937,30 +1282,43 @@ gs_no_fuel:
     call    hline_raw
 gs_no_right:
 
-    ; === HUD REPAIR: separator line (full width, black) ===
-    xor     a
-    ld      (_gfx_x1), a
-    ld      a, 255
-    ld      (_gfx_x2), a
+    ; === HUD BUFFER COPY: LDIR pre-rendered buffer to VRAM ===
+    ; Scroll is transparent — CPU writes are auto-offset by hardware.
+    ; So write to raw VRAM rows HUD_SEP_Y and HUD_TOP, no adjustment needed.
+
+    ; Separator line at HUD_SEP_Y
     ld      a, (_gs_hud_sep_y)
     ld      (_gfx_y1), a
     xor     a
     ld      (_gfx_y1+1), a
-    ld      (_gfx_colour), a        ; COL_BLACK = 0
-    call    hline_raw
-
-    ; === HUD REPAIR: top HUD line (full width, grey) ===
-    xor     a
     ld      (_gfx_x1), a
     ld      a, 255
     ld      (_gfx_x2), a
-    ld      a, (_gs_hud_top_y)
-    ld      (_gfx_y1), a
     xor     a
-    ld      (_gfx_y1+1), a
-    ld      a, (_gs_hud_col)
-    ld      (_gfx_colour), a
+    ld      (_gfx_colour), a   ; COL_BLACK = 0
     call    hline_raw
+
+    ; Copy HUD_BUF_ROWS rows from hud_buf to VRAM at HUD_TOP (no scroll adjust)
+    ld      a, (_gs_hud_top_y) ; HUD_TOP (raw VRAM Y)
+    ld      c, a               ; C = current VRAM row
+    ld      hl, _hud_buf       ; HL = RAM source (auto-advances via LDIR)
+    ld      b, HUD_BUF_ROWS
+hud_copy_row:
+    push    bc
+    ; Compute VRAM dest: row C → address C*128
+    ld      a, c
+    srl     a                  ; H = C >> 1
+    ld      d, a
+    ld      a, c
+    rrca
+    and     $80                ; L = (C & 1) << 7
+    ld      e, a
+    ; DE = VRAM dest, HL = RAM source
+    ld      bc, 128
+    ldir                       ; HL advances 128, DE advances 128
+    pop     bc
+    inc     c                  ; next VRAM row (wraps 255→0)
+    djnz    hud_copy_row
 
     ; === PLANE (gated by gs_do_plane, scroll-aware save-under) ===
     ld      a, (_gs_do_plane)
@@ -1218,6 +1576,38 @@ _scroll_get_asm:
     ld      a, 14
     out     ($16), a
     in      a, ($17)
+
+; ============================================================
+; hud_snapshot_asm — copy HUD VRAM rows to hud_buf in RAM
+; Call AFTER rendering HUD to VRAM at fixed Y (HUD_TOP).
+; Does its own bank switch.
+; ============================================================
+_hud_snapshot_asm:
+    call    swapgfxbk
+
+    ld      b, HUD_BUF_ROWS
+    ld      de, _hud_buf       ; DE = RAM dest
+    ld      c, HUD_TOP         ; C = starting VRAM row (where draw_hud rendered)
+
+hs_row:
+    push    bc
+    ; Compute VRAM source addr: C * 128
+    ld      a, c
+    srl     a
+    ld      h, a
+    ld      a, c
+    rrca
+    and     $80
+    ld      l, a
+    ; HL = VRAM source, DE = RAM dest
+    ld      bc, 128
+    ldir                       ; HL and DE auto-advance
+    pop     bc
+    inc     c                  ; next VRAM row
+    djnz    hs_row
+
+    call    swapgfxbk1
+    ret
     ld      (_scroll_val), a
     ld      l, a
     ret

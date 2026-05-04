@@ -22,6 +22,7 @@ extern void scroll_get_asm(void);
 extern void vsync_init_asm(void);
 extern void vsync_shutdown_asm(void);
 extern void wait_vsync_asm(void);
+extern void hud_snapshot_asm(void);
 
 /* Global parameter blocks (bss_graphics section in screen.asm) */
 extern uint16_t gfx_x1;
@@ -54,6 +55,7 @@ extern uint8_t  gs_hud_col;
 extern uint8_t  gs_blit_active;
 extern uint8_t  gs_blit_x;
 extern uint8_t  gs_blit_row;
+extern uint8_t  gs_blit_type;
 
 extern uint8_t  gs_scroll_reg;
 
@@ -154,6 +156,11 @@ void vid_set_blit(uint8_t active, uint8_t x, uint8_t row)
     gs_blit_row = row;
 }
 
+void vid_set_blit_type(uint8_t type)
+{
+    gs_blit_type = type;
+}
+
 void vid_set_plane_pose(uint8_t pose)
 {
     gs_plane_pose = pose;
@@ -192,6 +199,11 @@ void scroll_set(uint8_t val)
 {
     scroll_val = val;
     scroll_set_asm();
+}
+
+void hud_snapshot(void)
+{
+    hud_snapshot_asm();
 }
 
 uint8_t scroll_get(void)

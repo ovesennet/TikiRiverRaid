@@ -18,6 +18,16 @@ extern uint8_t gs_do_plane;
 #define FUEL_W  14
 #define FUEL_H  24
 
+/* Enemy constants */
+#define HELI_W   16
+#define HELI_H   10
+#define BOAT_W   32
+#define BOAT_H   8
+#define BLIT_FUEL  0
+#define BLIT_HELI  1
+#define BLIT_BOAT  2
+#define LIVES_START 3
+
 /* ── Delay loop ── */
 void delay(uint16_t n)
 {
@@ -79,15 +89,20 @@ static void draw_sprite(uint8_t x, uint8_t y,
 
 /* ── Game state ── */
 static uint16_t score;
-static uint8_t fuel_level;     /* 0..32: fuel gauge width in pixels */
+static uint16_t fuel;          /* 0..FUEL_FULL: internal fuel level */
+static uint8_t lives;
 
 /* Forward declaration */
 static void draw_centred(uint16_t y, const char *str, uint8_t colour);
 
 #define FUEL_MAX       32      /* full gauge width in pixels */
-#define FUEL_GAUGE_X   98      /* gauge bar left edge */
-#define FUEL_GAUGE_Y   243     /* gauge bar top */
+#define FUEL_FULL      1500    /* internal fuel at 100% (~30s at 50 batches/sec) */
+#define FUEL_PICKUP    450     /* 30% of FUEL_FULL */
+#define FUEL_GAUGE_X   40      /* gauge bar left edge */
+#define FUEL_GAUGE_Y   (HUD_TOP + 3)  /* gauge bar top (relative to HUD) */
 #define FUEL_GAUGE_H   5       /* gauge bar height */
+#define SCORE_X        160     /* score left edge */
+#define HUD_UPDATE_INTERVAL 50 /* batches between full HUD refresh (~1 sec) */
 
 /* ── Number to decimal string (right-aligned, up to 5 digits) ── */
 static char score_buf[7];
@@ -109,50 +124,41 @@ static void uint16_to_str(uint16_t val, char *buf)
     }
 }
 
-/* ── HUD drawing (full, for initial draw) ── */
+/* ── HUD drawing: renders to fixed VRAM rows, then snapshots to RAM ── */
 static void draw_hud(void)
 {
-    vid_hline(0, 255, HUD_SEP_Y, COL_BLACK);
+    uint8_t gauge_px;
+
     vid_fill_rect(0, HUD_TOP, 128, HUD_HEIGHT, HUD_COLOUR);
     vid_fill_rect(128, HUD_TOP, 128, HUD_HEIGHT, HUD_COLOUR);
 
-    /* Score */
-    uint16_to_str(score, score_buf);
-    draw_centred(HUD_TOP + 1, score_buf, COL_YELLOW);
-
-    /* Fuel gauge frame: "E" [bar area] "F" */
+    /* Fuel gauge frame: "E" [bar] "F" */
     vid_draw_text(FUEL_GAUGE_X - 12, FUEL_GAUGE_Y - 1, "E", COL_WHITE);
     vid_draw_text(FUEL_GAUGE_X + FUEL_MAX + 4, FUEL_GAUGE_Y - 1, "F", COL_WHITE);
-    /* Gauge outline (1px border) */
     vid_hline(FUEL_GAUGE_X - 1, FUEL_GAUGE_X + FUEL_MAX, FUEL_GAUGE_Y - 1, COL_WHITE);
     vid_hline(FUEL_GAUGE_X - 1, FUEL_GAUGE_X + FUEL_MAX, FUEL_GAUGE_Y + FUEL_GAUGE_H, COL_WHITE);
     vid_fill_rect(FUEL_GAUGE_X - 1, FUEL_GAUGE_Y, 1, FUEL_GAUGE_H, COL_WHITE);
     vid_fill_rect(FUEL_GAUGE_X + FUEL_MAX, FUEL_GAUGE_Y, 1, FUEL_GAUGE_H, COL_WHITE);
-    /* Fill gauge */
-    if (fuel_level > 0)
-        vid_fill_rect(FUEL_GAUGE_X, FUEL_GAUGE_Y, fuel_level, FUEL_GAUGE_H, COL_BRGREEN);
+    gauge_px = (uint8_t)(fuel * (uint16_t)FUEL_MAX / FUEL_FULL);
+    if (gauge_px > FUEL_MAX) gauge_px = FUEL_MAX;
+    if (gauge_px > 0)
+        vid_fill_rect(FUEL_GAUGE_X, FUEL_GAUGE_Y, gauge_px, FUEL_GAUGE_H, COL_BRGREEN);
 
-    /* ACTIVISION logo text */
-    draw_centred(HUD_TOP + HUD_HEIGHT - 7, "ACTIVISION", COL_BRBLUE);
-}
-
-/* ── Update score display (call when score changes) ── */
-static void update_score(void)
-{
+    /* Score — right of fuel gauge */
     uint16_to_str(score, score_buf);
-    /* Clear score area and redraw */
-    vid_fill_rect(80, HUD_TOP + 1, 96, 7, HUD_COLOUR);
-    draw_centred(HUD_TOP + 1, score_buf, COL_YELLOW);
-}
+    vid_draw_text(SCORE_X, FUEL_GAUGE_Y - 1, score_buf, COL_YELLOW);
 
-/* ── Update fuel gauge bar (call when fuel_level changes) ── */
-static void update_fuel_gauge(void)
-{
-    /* Clear gauge interior */
-    vid_fill_rect(FUEL_GAUGE_X, FUEL_GAUGE_Y, FUEL_MAX, FUEL_GAUGE_H, HUD_COLOUR);
-    /* Fill to current level */
-    if (fuel_level > 0)
-        vid_fill_rect(FUEL_GAUGE_X, FUEL_GAUGE_Y, fuel_level, FUEL_GAUGE_H, COL_BRGREEN);
+    /* Lives indicator — far right */
+    {
+        static char lives_buf[4];
+        lives_buf[0] = '0' + lives;
+        lives_buf[1] = 'x';
+        lives_buf[2] = '\0';
+        vid_draw_text(220, FUEL_GAUGE_Y - 1, lives_buf, COL_WHITE);
+    }
+
+    /* Snapshot VRAM rows → RAM buffer for per-step copy */
+    hud_snapshot();
 }
 
 /* ── Centre text on screen (256px wide, 6px per char) ── */
@@ -214,40 +220,74 @@ static uint8_t title_screen(void)
 /* ── Game loop with vertical scrolling river ── */
 static uint8_t scroll_speed;
 
-/* Fuel barrel — single counter approach, no state machine */
+/* Fuel barrel — single counter approach */
 static uint8_t fuel_x;
 static uint16_t fuel_step;
 static uint16_t fuel_gap;
+
+/* Enemy — same counter approach as fuel */
+static uint8_t enemy_x;
+static uint16_t enemy_step;
+static uint16_t enemy_gap;
+static uint8_t enemy_type;     /* BLIT_HELI or BLIT_BOAT */
+static uint8_t enemy_h;        /* height of current enemy */
+static uint8_t enemy_w;        /* width of current enemy */
+
+/* Lives */
+static uint8_t hit_flash;      /* >0: invulnerability frames after hit */
+
+/* River bank edge storage — indexed by VRAM row (ring buffer) */
+static uint8_t bank_l[256];    /* left edge per VRAM row */
+static uint8_t bank_r[256];    /* right edge per VRAM row */
+
 static uint8_t plane_x;
 static uint8_t gl_left, gl_right;
 static uint16_t gl_y;
 static uint8_t gl_scroll_reg;
 static uint8_t gl_keys;
 static uint8_t gl_input_ctr;
+static uint8_t hud_timer;
 
 #define MOVE_SPEED 3
 
 static void game_loop(void)
 {
-
     vid_clear();
     scroll_set(0);
     scroll_speed = SCROLL_SPEED_DEFAULT;
     plane_x = PLANE_START_X;
     sav_valid = 0;
     score = 0;
-    fuel_level = FUEL_MAX;
+    fuel = FUEL_FULL;
+    lives = LIVES_START;
+    hit_flash = 0;
+
+restart:
+    vid_clear();
+    scroll_set(0);
+    scroll_speed = SCROLL_SPEED_DEFAULT;
+    plane_x = PLANE_START_X;
+    sav_valid = 0;
+    hit_flash = 0;
 
     /* Init river with game seed */
     river_init(RNG_SEED);
     fuel_step = 0;
     fuel_x = 100;
     fuel_gap = 500;
+    enemy_step = 0;
+    enemy_x = 80;
+    enemy_gap = 80;
+    enemy_type = BLIT_HELI;
+    enemy_h = HELI_H;
+    enemy_w = HELI_W;
 
-    /* Fill screen with initial river */
+    /* Fill screen with initial river + store bank edges */
     for (gl_y = 0; gl_y < SCREEN_H; gl_y++) {
         river_generate_line(&gl_left, &gl_right);
         vid_draw_river_line((uint8_t)(SCREEN_H - 1 - gl_y), gl_left, gl_right);
+        bank_l[(uint8_t)(SCREEN_H - 1 - gl_y)] = gl_left;
+        bank_r[(uint8_t)(SCREEN_H - 1 - gl_y)] = gl_right;
     }
 
     /* Draw initial HUD — plane will be drawn by first vid_game_step */
@@ -256,6 +296,7 @@ static void game_loop(void)
     gl_scroll_reg = 0;
     gl_keys = 0;
     gl_input_ctr = 0;
+    hud_timer = 0;
 
     for (;;) {
         /* Input once per batch */
@@ -282,22 +323,27 @@ static void game_loop(void)
             scroll_set(gl_scroll_reg);
             river_generate_line(&gl_left, &gl_right);
 
-            /* Fuel barrel */
+            /* Store bank edges for this VRAM row */
+            bank_l[gl_scroll_reg] = gl_left;
+            bank_r[gl_scroll_reg] = gl_right;
+
+            /* Decide which object to blit this step: fuel barrel or enemy */
             if (fuel_step < FUEL_H) {
+                vid_set_blit_type(BLIT_FUEL);
                 vid_set_blit(1, fuel_x, (uint8_t)fuel_step);
+            } else if (enemy_step < enemy_h) {
+                vid_set_blit_type(enemy_type);
+                vid_set_blit(1, enemy_x, (uint8_t)enemy_step);
             } else {
                 vid_set_blit(0, 0, 0);
             }
 
-            /* Draw plane only on last step (after all scrolls) */
-            if (gl_input_ctr + 1 == scroll_speed) {
-                gs_do_plane = 1;
-            } else {
-                gs_do_plane = 0;
-            }
+            /* Draw plane every step to prevent jitter */
+            gs_do_plane = 1;
 
             vid_game_step(gl_scroll_reg, 0, gl_left, gl_right, plane_x, PLANE_Y, COL_YELLOW);
 
+            /* Advance fuel counter */
             fuel_step++;
             if (fuel_step >= (uint16_t)(FUEL_H + fuel_gap)) {
                 uint8_t rnd, range;
@@ -312,19 +358,167 @@ static void game_loop(void)
                 }
                 fuel_x = fuel_x & 0xFE;
             }
+
+            /* Advance enemy counter */
+            enemy_step++;
+            if (enemy_step >= (uint16_t)(enemy_h + enemy_gap)) {
+                uint8_t rnd, range;
+                enemy_step = 0;
+                rnd = (frame_counter * 7) ^ gl_scroll_reg;
+                /* Alternate heli and boat */
+                if (rnd & 0x04) {
+                    enemy_type = BLIT_HELI;
+                    enemy_h = HELI_H;
+                    enemy_w = HELI_W;
+                } else {
+                    enemy_type = BLIT_BOAT;
+                    enemy_h = BOAT_H;
+                    enemy_w = BOAT_W;
+                }
+                enemy_gap = 60 + (uint16_t)(rnd & 0x3F);
+                range = gl_right - gl_left;
+                if (range > enemy_w + 4) {
+                    enemy_x = gl_left + 2 + (rnd % (range - enemy_w - 2));
+                } else {
+                    enemy_x = gl_left + 2;
+                }
+                enemy_x = enemy_x & 0xFE;
+            }
         }
 
         /* Score: +10 per batch */
         score += 10;
 
-        /* Fuel: slowly deplete */
-        if (fuel_level > 0)
-            fuel_level--;
+        /* Fuel: deplete 1 per batch (empty in ~30s at 50Hz) */
+        if (fuel > 0)
+            fuel--;
 
-        /* Redraw full HUD (scroll shifts it every step) */
-        draw_hud();
+        /* Hit flash countdown */
+        if (hit_flash > 0)
+            hit_flash--;
+
+        /* Barrel collision: check when barrel has scrolled to plane's Y */
+        if (fuel_step >= (uint16_t)PLANE_Y &&
+            fuel_step <= (uint16_t)(PLANE_Y + PLANE_H + FUEL_H - 2)) {
+            if (plane_x + PLANE_W > fuel_x && plane_x < fuel_x + FUEL_W) {
+                fuel = fuel + FUEL_PICKUP;
+                if (fuel > FUEL_FULL) fuel = FUEL_FULL;
+                fuel_step = (uint16_t)(PLANE_Y + PLANE_H + FUEL_H);
+                score += 100;
+            }
+        }
+
+        /* River bank collision: check plane against stored edges at PLANE_Y */
+        if (hit_flash == 0) {
+            uint8_t bl, br;
+            bl = bank_l[PLANE_Y];
+            br = bank_r[PLANE_Y];
+            if (plane_x < bl || (plane_x + PLANE_W) > br) {
+                goto crash;
+            }
+        }
+
+        /* Enemy collision: check when enemy has scrolled to plane's Y */
+        if (hit_flash == 0 &&
+            enemy_step >= (uint16_t)PLANE_Y &&
+            enemy_step <= (uint16_t)(PLANE_Y + PLANE_H + enemy_h - 2)) {
+            if (plane_x + PLANE_W > enemy_x && plane_x < enemy_x + enemy_w) {
+                /* Explode the enemy sprite at its current screen position */
+                {
+                    uint8_t ey;
+                    ey = PLANE_Y;
+                    vid_fill_rect(enemy_x, ey, enemy_w, enemy_h, COL_BLUE);
+                    vid_fill_rect(enemy_x + 2, ey + 0, 1, 1, COL_YELLOW);
+                    vid_fill_rect(enemy_x + 5, ey + 1, 2, 1, COL_BRRED);
+                    vid_fill_rect(enemy_x + 1, ey + 2, 1, 1, COL_YELLOW);
+                    vid_fill_rect(enemy_x + 7, ey + 2, 1, 1, COL_BRRED);
+                    vid_fill_rect(enemy_x + 3, ey + 3, 2, 1, COL_YELLOW);
+                    vid_fill_rect(enemy_x + 0, ey + 4, 1, 1, COL_BRRED);
+                    vid_fill_rect(enemy_x + 6, ey + 4, 1, 1, COL_YELLOW);
+                    vid_fill_rect(enemy_x + 4, ey + 5, 1, 1, COL_BRRED);
+                    vid_fill_rect(enemy_x + 8, ey + 5, 1, 1, COL_YELLOW);
+                    vid_fill_rect(enemy_x + 2, ey + 6, 1, 1, COL_YELLOW);
+                    vid_fill_rect(enemy_x + 6, ey + 7, 1, 1, COL_BRRED);
+                }
+                score += 200;
+                enemy_step = (uint16_t)(PLANE_Y + PLANE_H + enemy_h);
+                goto crash;
+            }
+        }
+
+        /* Game over if fuel empty */
+        if (fuel == 0) {
+            goto crash;
+        }
+
+        /* Periodically re-render HUD to RAM buffer (~1 sec) */
+        hud_timer++;
+        if (hud_timer >= HUD_UPDATE_INTERVAL) {
+            hud_timer = 0;
+            draw_hud();
+        }
+        continue;
+
+crash:
+        /* Stop scroll, draw scattered explosion dots over plane */
+        {
+            uint8_t cx, cy;
+            cx = plane_x;
+            cy = PLANE_Y;
+
+            /* Clear plane area */
+            vid_fill_rect(cx, cy, 12, 12, COL_BLUE);
+
+            /* Scattered dots — yellow and red, ~16x16 area */
+            vid_fill_rect(cx + 2, cy + 0, 1, 1, COL_YELLOW);
+            vid_fill_rect(cx + 8, cy + 0, 1, 1, COL_BRRED);
+            vid_fill_rect(cx + 12, cy + 1, 1, 1, COL_YELLOW);
+            vid_fill_rect(cx + 0, cy + 2, 1, 1, COL_BRRED);
+            vid_fill_rect(cx + 5, cy + 1, 2, 1, COL_YELLOW);
+            vid_fill_rect(cx + 10, cy + 2, 1, 1, COL_BRRED);
+            vid_fill_rect(cx + 3, cy + 3, 1, 1, COL_BRRED);
+            vid_fill_rect(cx + 7, cy + 3, 2, 1, COL_YELLOW);
+            vid_fill_rect(cx + 13, cy + 3, 1, 1, COL_YELLOW);
+            vid_fill_rect(cx + 1, cy + 4, 1, 1, COL_YELLOW);
+            vid_fill_rect(cx + 5, cy + 4, 1, 2, COL_BRRED);
+            vid_fill_rect(cx + 9, cy + 5, 2, 1, COL_YELLOW);
+            vid_fill_rect(cx + 11, cy + 4, 1, 1, COL_BRRED);
+            vid_fill_rect(cx + 0, cy + 6, 1, 1, COL_YELLOW);
+            vid_fill_rect(cx + 3, cy + 6, 2, 1, COL_YELLOW);
+            vid_fill_rect(cx + 7, cy + 6, 1, 1, COL_BRRED);
+            vid_fill_rect(cx + 12, cy + 6, 1, 1, COL_YELLOW);
+            vid_fill_rect(cx + 2, cy + 7, 1, 1, COL_BRRED);
+            vid_fill_rect(cx + 6, cy + 8, 2, 1, COL_YELLOW);
+            vid_fill_rect(cx + 10, cy + 7, 1, 1, COL_YELLOW);
+            vid_fill_rect(cx + 8, cy + 9, 1, 1, COL_BRRED);
+            vid_fill_rect(cx + 1, cy + 9, 1, 1, COL_YELLOW);
+            vid_fill_rect(cx + 4, cy + 10, 1, 1, COL_BRRED);
+            vid_fill_rect(cx + 11, cy + 10, 1, 1, COL_YELLOW);
+            vid_fill_rect(cx + 3, cy + 11, 1, 1, COL_YELLOW);
+            vid_fill_rect(cx + 9, cy + 11, 1, 1, COL_BRRED);
+            vid_fill_rect(cx + 13, cy + 9, 1, 1, COL_BRRED);
+
+            /* Hold for ~1 second */
+            delay(60000);
+        }
+
+        if (lives > 1) {
+            lives--;
+            fuel = FUEL_FULL;
+            draw_hud();
+            goto restart;
+        } else {
+            lives = 0;
+            vid_fill_rect(60, 100, 136, 24, COL_BLACK);
+            draw_centred(108, "GAME OVER", COL_BRRED);
+            delay(60000);
+            delay(60000);
+            delay(60000);
+            goto game_over;
+        }
     }
 
+game_over:
     /* Reset scroll before returning to title */
     scroll_set(0);
 }

@@ -24,6 +24,9 @@ void vid_game_step(uint8_t scroll_reg, uint8_t riv_line_y, uint8_t left, uint8_t
 /* Set fuel sprite blit params (call before vid_game_step) */
 void vid_set_blit(uint8_t active, uint8_t x, uint8_t row);
 
+/* Set blit sprite type: 0=fuel, 1=heli, 2=boat */
+void vid_set_blit_type(uint8_t type);
+
 /* Set plane sprite pose: 0=forward, 1=left, 2=right (call before vid_game_step) */
 void vid_set_plane_pose(uint8_t pose);
 
@@ -46,5 +49,8 @@ void wait_vsync(void);
 
 /* Frame counter — incremented by ISR at 50 Hz */
 extern uint8_t frame_counter;
+
+/* Snapshot HUD VRAM rows into RAM buffer (call after rendering HUD) */
+void hud_snapshot(void);
 
 #endif /* VIDEO_H */

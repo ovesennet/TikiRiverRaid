@@ -233,8 +233,19 @@ static uint8_t enemy_type;     /* BLIT_HELI or BLIT_BOAT */
 static uint8_t enemy_h;        /* height of current enemy */
 static uint8_t enemy_w;        /* width of current enemy */
 
+/* Simple 8-bit LFSR RNG */
+static uint8_t rng_state;
+static uint8_t rng_next(void) {
+    uint8_t b = rng_state;
+    b = (b >> 1) ^ ((b & 1) ? 0xB4 : 0);
+    rng_state = b;
+    return b;
+}
+
 /* Lives */
 static uint8_t hit_flash;      /* >0: invulnerability frames after hit */
+static uint8_t crash_enemy;    /* 1 = crashed into enemy, draw enemy explosion too */
+static uint8_t crash_ex, crash_ey, crash_ew, crash_eh; /* enemy pos at crash */
 
 /* River bank edge storage — indexed by VRAM row (ring buffer) */
 static uint8_t bank_l[256];    /* left edge per VRAM row */
@@ -275,12 +286,13 @@ restart:
     fuel_step = 0;
     fuel_x = 100;
     fuel_gap = 500;
-    enemy_step = 0;
+    enemy_step = (uint16_t)(PLANE_Y + PLANE_H + HELI_H);
     enemy_x = 80;
-    enemy_gap = 80;
+    enemy_gap = 2;
     enemy_type = BLIT_HELI;
     enemy_h = HELI_H;
     enemy_w = HELI_W;
+    rng_state = frame_counter | 1;  /* seed RNG, ensure non-zero */
 
     /* Fill screen with initial river + store bank edges */
     for (gl_y = 0; gl_y < SCREEN_H; gl_y++) {
@@ -327,13 +339,13 @@ restart:
             bank_l[gl_scroll_reg] = gl_left;
             bank_r[gl_scroll_reg] = gl_right;
 
-            /* Decide which object to blit this step: fuel barrel or enemy */
-            if (fuel_step < FUEL_H) {
-                vid_set_blit_type(BLIT_FUEL);
-                vid_set_blit(1, fuel_x, (uint8_t)fuel_step);
-            } else if (enemy_step < enemy_h) {
+            /* Decide which object to blit this step: enemy takes priority */
+            if (enemy_step < enemy_h) {
                 vid_set_blit_type(enemy_type);
                 vid_set_blit(1, enemy_x, (uint8_t)enemy_step);
+            } else if (fuel_step < FUEL_H) {
+                vid_set_blit_type(BLIT_FUEL);
+                vid_set_blit(1, fuel_x, (uint8_t)fuel_step);
             } else {
                 vid_set_blit(0, 0, 0);
             }
@@ -343,9 +355,11 @@ restart:
 
             vid_game_step(gl_scroll_reg, 0, gl_left, gl_right, plane_x, PLANE_Y, COL_YELLOW);
 
-            /* Advance fuel counter */
+            /* Advance fuel counter — pause while enemy is drawing */
+            if (enemy_step >= enemy_h) {
             fuel_step++;
-            if (fuel_step >= (uint16_t)(FUEL_H + fuel_gap)) {
+            if (fuel_step >= (uint16_t)(FUEL_H + fuel_gap)
+                && enemy_step >= (uint16_t)(enemy_h + FUEL_H + 20)) {
                 uint8_t rnd, range;
                 fuel_step = 0;
                 rnd = frame_counter ^ gl_scroll_reg;
@@ -358,15 +372,17 @@ restart:
                 }
                 fuel_x = fuel_x & 0xFE;
             }
+            } /* end if enemy not drawing */
 
-            /* Advance enemy counter */
+            /* Advance enemy counter — reset after passing plane + gap */
             enemy_step++;
-            if (enemy_step >= (uint16_t)(enemy_h + enemy_gap)) {
+            if (enemy_step >= (uint16_t)(PLANE_Y + PLANE_H + enemy_h + enemy_gap)
+                && fuel_step >= (uint16_t)(FUEL_H + FUEL_H + 20)) {
                 uint8_t rnd, range;
                 enemy_step = 0;
-                rnd = (frame_counter * 7) ^ gl_scroll_reg;
-                /* Alternate heli and boat */
-                if (rnd & 0x04) {
+                rnd = rng_next();
+                /* Random heli/boat selection */
+                if (rnd & 0x01) {
                     enemy_type = BLIT_HELI;
                     enemy_h = HELI_H;
                     enemy_w = HELI_W;
@@ -375,7 +391,7 @@ restart:
                     enemy_h = BOAT_H;
                     enemy_w = BOAT_W;
                 }
-                enemy_gap = 60 + (uint16_t)(rnd & 0x3F);
+                enemy_gap = 2 + (uint16_t)(rnd & 0x07);
                 range = gl_right - gl_left;
                 if (range > enemy_w + 4) {
                     enemy_x = gl_left + 2 + (rnd % (range - enemy_w - 2));
@@ -383,6 +399,47 @@ restart:
                     enemy_x = gl_left + 2;
                 }
                 enemy_x = enemy_x & 0xFE;
+            }
+
+            /* --- Per-step collision checks (instant response) --- */
+
+            /* Barrel collision */
+            if (fuel_step >= (uint16_t)PLANE_Y &&
+                fuel_step <= (uint16_t)(PLANE_Y + PLANE_H + FUEL_H - 2)) {
+                if (plane_x + PLANE_W > fuel_x && plane_x < fuel_x + FUEL_W) {
+                    fuel = fuel + FUEL_PICKUP;
+                    if (fuel > FUEL_FULL) fuel = FUEL_FULL;
+                    fuel_step = (uint16_t)(PLANE_Y + PLANE_H + FUEL_H);
+                    score += 100;
+                }
+            }
+
+            /* River bank collision */
+            if (hit_flash == 0) {
+                uint8_t bl, br;
+                bl = bank_l[PLANE_Y];
+                br = bank_r[PLANE_Y];
+                if (plane_x < bl || (plane_x + PLANE_W) > br) {
+                    crash_enemy = 0;
+                    goto crash;
+                }
+            }
+
+            /* Enemy collision */
+            if (hit_flash == 0 &&
+                enemy_step >= (uint16_t)PLANE_Y &&
+                enemy_step <= (uint16_t)(PLANE_Y + PLANE_H + enemy_h - 2)) {
+                if (plane_x + PLANE_W > enemy_x && plane_x < enemy_x + enemy_w) {
+                    score += 200;
+                    crash_enemy = 1;
+                    crash_ex = enemy_x;
+                    crash_ew = enemy_w;
+                    crash_eh = enemy_h + 4;
+                    /* Enemy top VRAM row = scroll_reg + step - h, with margin */
+                    crash_ey = (uint8_t)(gl_scroll_reg + (uint8_t)enemy_step - enemy_h - 2);
+                    enemy_step = (uint16_t)(PLANE_Y + PLANE_H + enemy_h);
+                    goto crash;
+                }
             }
         }
 
@@ -397,57 +454,9 @@ restart:
         if (hit_flash > 0)
             hit_flash--;
 
-        /* Barrel collision: check when barrel has scrolled to plane's Y */
-        if (fuel_step >= (uint16_t)PLANE_Y &&
-            fuel_step <= (uint16_t)(PLANE_Y + PLANE_H + FUEL_H - 2)) {
-            if (plane_x + PLANE_W > fuel_x && plane_x < fuel_x + FUEL_W) {
-                fuel = fuel + FUEL_PICKUP;
-                if (fuel > FUEL_FULL) fuel = FUEL_FULL;
-                fuel_step = (uint16_t)(PLANE_Y + PLANE_H + FUEL_H);
-                score += 100;
-            }
-        }
-
-        /* River bank collision: check plane against stored edges at PLANE_Y */
-        if (hit_flash == 0) {
-            uint8_t bl, br;
-            bl = bank_l[PLANE_Y];
-            br = bank_r[PLANE_Y];
-            if (plane_x < bl || (plane_x + PLANE_W) > br) {
-                goto crash;
-            }
-        }
-
-        /* Enemy collision: check when enemy has scrolled to plane's Y */
-        if (hit_flash == 0 &&
-            enemy_step >= (uint16_t)PLANE_Y &&
-            enemy_step <= (uint16_t)(PLANE_Y + PLANE_H + enemy_h - 2)) {
-            if (plane_x + PLANE_W > enemy_x && plane_x < enemy_x + enemy_w) {
-                /* Explode the enemy sprite at its current screen position */
-                {
-                    uint8_t ey;
-                    ey = PLANE_Y;
-                    vid_fill_rect(enemy_x, ey, enemy_w, enemy_h, COL_BLUE);
-                    vid_fill_rect(enemy_x + 2, ey + 0, 1, 1, COL_YELLOW);
-                    vid_fill_rect(enemy_x + 5, ey + 1, 2, 1, COL_BRRED);
-                    vid_fill_rect(enemy_x + 1, ey + 2, 1, 1, COL_YELLOW);
-                    vid_fill_rect(enemy_x + 7, ey + 2, 1, 1, COL_BRRED);
-                    vid_fill_rect(enemy_x + 3, ey + 3, 2, 1, COL_YELLOW);
-                    vid_fill_rect(enemy_x + 0, ey + 4, 1, 1, COL_BRRED);
-                    vid_fill_rect(enemy_x + 6, ey + 4, 1, 1, COL_YELLOW);
-                    vid_fill_rect(enemy_x + 4, ey + 5, 1, 1, COL_BRRED);
-                    vid_fill_rect(enemy_x + 8, ey + 5, 1, 1, COL_YELLOW);
-                    vid_fill_rect(enemy_x + 2, ey + 6, 1, 1, COL_YELLOW);
-                    vid_fill_rect(enemy_x + 6, ey + 7, 1, 1, COL_BRRED);
-                }
-                score += 200;
-                enemy_step = (uint16_t)(PLANE_Y + PLANE_H + enemy_h);
-                goto crash;
-            }
-        }
-
         /* Game over if fuel empty */
         if (fuel == 0) {
+            crash_enemy = 0;
             goto crash;
         }
 
@@ -460,7 +469,7 @@ restart:
         continue;
 
 crash:
-        /* Stop scroll, draw scattered explosion dots over plane */
+        /* Stop scroll, draw scattered explosion dots over plane and enemy */
         {
             uint8_t cx, cy;
             cx = plane_x;
@@ -469,7 +478,7 @@ crash:
             /* Clear plane area */
             vid_fill_rect(cx, cy, 12, 12, COL_BLUE);
 
-            /* Scattered dots — yellow and red, ~16x16 area */
+            /* Plane explosion dots */
             vid_fill_rect(cx + 2, cy + 0, 1, 1, COL_YELLOW);
             vid_fill_rect(cx + 8, cy + 0, 1, 1, COL_BRRED);
             vid_fill_rect(cx + 12, cy + 1, 1, 1, COL_YELLOW);
@@ -497,6 +506,27 @@ crash:
             vid_fill_rect(cx + 3, cy + 11, 1, 1, COL_YELLOW);
             vid_fill_rect(cx + 9, cy + 11, 1, 1, COL_BRRED);
             vid_fill_rect(cx + 13, cy + 9, 1, 1, COL_BRRED);
+
+            /* Enemy explosion if crashed into enemy */
+            if (crash_enemy) {
+                uint8_t ei;
+                /* Clear enemy area row by row (handles VRAM wrap) */
+                for (ei = 0; ei < crash_eh; ei++) {
+                    uint8_t ry;
+                    ry = (uint8_t)(crash_ey + ei);
+                    vid_fill_rect(crash_ex, ry, crash_ew, 1, COL_BLUE);
+                }
+                /* Explosion dots centered in cleared area */
+                vid_fill_rect(crash_ex + 2, (uint8_t)(crash_ey + 2), 1, 1, COL_YELLOW);
+                vid_fill_rect(crash_ex + 5, (uint8_t)(crash_ey + 3), 2, 1, COL_BRRED);
+                vid_fill_rect(crash_ex + 1, (uint8_t)(crash_ey + 4), 1, 1, COL_YELLOW);
+                vid_fill_rect(crash_ex + 7, (uint8_t)(crash_ey + 4), 1, 1, COL_BRRED);
+                vid_fill_rect(crash_ex + 3, (uint8_t)(crash_ey + 5), 2, 1, COL_YELLOW);
+                vid_fill_rect(crash_ex + 0, (uint8_t)(crash_ey + 6), 1, 1, COL_BRRED);
+                vid_fill_rect(crash_ex + 6, (uint8_t)(crash_ey + 6), 1, 1, COL_YELLOW);
+                vid_fill_rect(crash_ex + 4, (uint8_t)(crash_ey + 7), 1, 1, COL_BRRED);
+                vid_fill_rect(crash_ex + 8, (uint8_t)(crash_ey + 7), 1, 1, COL_YELLOW);
+            }
 
             /* Hold for ~1 second */
             delay(60000);

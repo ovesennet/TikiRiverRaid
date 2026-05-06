@@ -7,6 +7,8 @@ for the **TIKI-100** computer — a Norwegian Z80-based CP/M machine from the 19
 Written in C and Z80 assembly using the **z88dk** toolchain (sccz80 compiler).
 Outputs a CP/M .COM executable and a raw 400K disk image for the Djupdal emulator.
 
+NOTE: The game is not bug-free, but playable. You are welcome to contribute by fixing bugs.
+
 ## Target Hardware
 
 - **CPU:** Z80 @ 4 MHz

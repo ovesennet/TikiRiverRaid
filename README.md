@@ -14,7 +14,7 @@ NOTE: The game is not bug-free, but playable. You are welcome to contribute by f
 The easiest way to play is with the included emulator on Windows:
 
 1. Launch **`tikiemul.exe`** — then load the dsk/work.dsk floppy disk image file
-2. Select **R TIKIRR** from the TIKI-menu to start the game
+2. Select **O TIKIRR** from the TIKI-menu to start the game
 
 ### Running on real hardware
 

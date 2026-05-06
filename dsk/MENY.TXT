@@ -46,6 +46,6 @@ R 'Sett filattributter           '  'SETT'     'Filer og attributter: '
 R 'Kommando-oversikt             '  '!'
 R 'Endre navn p} fil             '  'REN'      'Skriv: <nyfil>=<gammelfil>'
 R 'Slett fil(er)                 '  'ERA'      'Hvilke filer ? '
-R 'TIKI ARKANOID                 '  'TIKIARK'
+R 'TIKI RIVER RAID               '  'TIKIRR'
 Velg program:
 

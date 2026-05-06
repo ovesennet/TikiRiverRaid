@@ -27,6 +27,15 @@ void vid_set_blit(uint8_t active, uint8_t x, uint8_t row);
 /* Set blit sprite type: 0=fuel, 1=heli, 2=boat */
 void vid_set_blit_type(uint8_t type);
 
+/* Set blit mirror: mirror=1 to flip horizontally */
+void vid_set_blit_mirror(uint8_t mirror);
+
+/* Shift enemy sprite in VRAM horizontally (preserves pixel data) */
+void vid_enemy_shift(uint8_t screen_y, uint8_t old_x, uint8_t new_x, uint8_t width, uint8_t height);
+
+/* Mirror enemy sprite horizontally in VRAM (reverses bytes + swaps nibbles) */
+void vid_enemy_mirror(uint8_t screen_y, uint8_t x, uint8_t width, uint8_t height);
+
 /* Set plane sprite pose: 0=forward, 1=left, 2=right (call before vid_game_step) */
 void vid_set_plane_pose(uint8_t pose);
 

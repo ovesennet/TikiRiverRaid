@@ -24,6 +24,8 @@
     PUBLIC  _vid_begin_vram_asm
     PUBLIC  _vid_end_vram_asm
     PUBLIC  _vid_hline_nr_asm
+    PUBLIC  _vid_enemy_shift_asm
+    PUBLIC  _vid_enemy_mirror_asm
     PUBLIC  _vid_fill_rect_nr_asm
     PUBLIC  _scroll_set_asm
     PUBLIC  _scroll_get_asm
@@ -114,13 +116,28 @@ _gs_hud_col:   defs 1
     PUBLIC  _gs_blit_x
     PUBLIC  _gs_blit_row
     PUBLIC  _gs_blit_type
+    PUBLIC  _gs_blit_mirror
     PUBLIC  _gs_do_plane
 
 _gs_blit_active: defs 1
 _gs_blit_x:      defs 1
 _gs_blit_row:    defs 1
-_gs_blit_type:   defs 1        ; 0=fuel, 1=heli, 2=boat
+_gs_blit_type:   defs 1        ; 0=fuel, 1=heli, 2=boat, 3=jet
+_gs_blit_mirror: defs 1        ; 0=normal, 1=horizontally flipped
 _gs_do_plane:    defs 1
+
+; Enemy shift parameters
+    PUBLIC  _es_screen_y
+    PUBLIC  _es_old_x
+    PUBLIC  _es_new_x
+    PUBLIC  _es_width
+    PUBLIC  _es_height
+
+_es_screen_y:  defs 1
+_es_old_x:     defs 1
+_es_new_x:     defs 1
+_es_width:     defs 1
+_es_height:    defs 1
 
     PUBLIC  _gs_scroll_reg
 _gs_scroll_reg:  defs 1
@@ -858,13 +875,29 @@ gs_no_left:
     xor     a
     ld      (_gfx_y1+1), a
 
-    ; Dispatch by blit_type: 0=fuel, 1=heli, 2=boat
+    ; Dispatch by blit_type: 0=fuel, 1=heli, 2=boat, 3=jet
+    ; Then check mirror flag for enemy sprites
     ld      a, (_gs_blit_type)
     or      a
     jp      z, gs_draw_fuel
+    ld      b, a               ; B = blit_type
+    ld      a, (_gs_blit_mirror)
+    or      a
+    jr      z, gs_disp_normal
+    ; Mirrored versions
+    ld      a, b
+    cp      1
+    jp      z, gs_draw_heli_m
+    cp      2
+    jp      z, gs_draw_boat_m
+    jp      gs_draw_jet_m
+gs_disp_normal:
+    ld      a, b
     cp      1
     jp      z, gs_draw_heli
-    jp      gs_draw_boat
+    cp      2
+    jp      z, gs_draw_boat
+    jp      gs_draw_jet
 
     ; ── FUEL BARREL (14x24) ──
 gs_draw_fuel:
@@ -967,7 +1000,7 @@ gs_draw_heli:
     ld      (_gfx_x2), a
     ld      a, 2               ; COL_GREEN
     ld      (_gfx_colour), a
-    call    hline_raw
+        call    hline_raw
     jp      gs_heli_done
 gs_heli_r1:
     cp      1
@@ -981,7 +1014,7 @@ gs_heli_r1:
     ld      (_gfx_x2), a
     ld      a, 2               ; COL_GREEN
     ld      (_gfx_colour), a
-    call    hline_raw
+        call    hline_raw
     jp      gs_heli_done
 gs_heli_r2:
     cp      2
@@ -994,7 +1027,7 @@ gs_heli_r2:
     ld      (_gfx_x2), a
     ld      a, 2               ; COL_GREEN
     ld      (_gfx_colour), a
-    call    hline_raw
+        call    hline_raw
     ; G x+8..x+13 (body)
     ld      a, (_riv_y)
     ld      (_gfx_y1), a
@@ -1008,7 +1041,7 @@ gs_heli_r2:
     ld      (_gfx_x2), a
     ld      a, 2               ; COL_GREEN
     ld      (_gfx_colour), a
-    call    hline_raw
+        call    hline_raw
     jp      gs_heli_done
 gs_heli_r3:
     cp      3
@@ -1021,7 +1054,7 @@ gs_heli_r3:
     ld      (_gfx_x2), a
     ld      a, 7               ; COL_LTGREY
     ld      (_gfx_colour), a
-    call    hline_raw
+        call    hline_raw
     jp      gs_heli_done
 gs_heli_r4:
     cp      4
@@ -1034,7 +1067,7 @@ gs_heli_r4:
     ld      (_gfx_x2), a
     ld      a, 7               ; COL_LTGREY
     ld      (_gfx_colour), a
-    call    hline_raw
+        call    hline_raw
     jp      gs_heli_done
 gs_heli_r5:
     cp      5
@@ -1047,7 +1080,7 @@ gs_heli_r5:
     ld      (_gfx_x2), a
     ld      a, 2               ; COL_GREEN
     ld      (_gfx_colour), a
-    call    hline_raw
+        call    hline_raw
     ; G x+6..x+15 (body)
     ld      a, (_riv_y)
     ld      (_gfx_y1), a
@@ -1061,7 +1094,7 @@ gs_heli_r5:
     ld      (_gfx_x2), a
     ld      a, 2               ; COL_GREEN
     ld      (_gfx_colour), a
-    call    hline_raw
+        call    hline_raw
     jp      gs_heli_done
 gs_heli_r6:
     cp      6
@@ -1075,7 +1108,7 @@ gs_heli_r6:
     ld      (_gfx_x2), a
     ld      a, 2               ; COL_GREEN
     ld      (_gfx_colour), a
-    call    hline_raw
+        call    hline_raw
     jp      gs_heli_done
 gs_heli_r7:
     cp      7
@@ -1093,7 +1126,7 @@ gs_heli_r7:
     ld      (_gfx_x2), a
     ld      a, 6               ; COL_BRYELLOW
     ld      (_gfx_colour), a
-    call    hline_raw
+        call    hline_raw
     jp      gs_heli_done
 gs_heli_r8:
     cp      8
@@ -1111,7 +1144,7 @@ gs_heli_r8:
     ld      (_gfx_x2), a
     ld      a, 6               ; COL_BRYELLOW
     ld      (_gfx_colour), a
-    call    hline_raw
+        call    hline_raw
     jp      gs_heli_done
 gs_heli_r9:
     cp      9
@@ -1129,7 +1162,7 @@ gs_heli_r9:
     ld      (_gfx_x2), a
     ld      a, 6               ; COL_BRYELLOW
     ld      (_gfx_colour), a
-    call    hline_raw
+        call    hline_raw
 gs_heli_done:
     xor     a
     ld      (_gs_blit_active), a
@@ -1158,7 +1191,7 @@ gs_draw_boat:
     ld      (_gfx_x2), a
     ld      a, 7               ; COL_LTGREY
     ld      (_gfx_colour), a
-    call    hline_raw
+        call    hline_raw
     jp      gs_boat_done
 gs_boat_r1:
     cp      1
@@ -1172,7 +1205,7 @@ gs_boat_r1:
     ld      (_gfx_x2), a
     ld      a, 7               ; COL_LTGREY
     ld      (_gfx_colour), a
-    call    hline_raw
+        call    hline_raw
     jp      gs_boat_done
 gs_boat_r2:
     cp      2
@@ -1186,7 +1219,7 @@ gs_boat_r2:
     ld      (_gfx_x2), a
     ld      a, 4               ; COL_RED
     ld      (_gfx_colour), a
-    call    hline_raw
+        call    hline_raw
     jp      gs_boat_done
 gs_boat_r3:
     cp      3
@@ -1199,7 +1232,7 @@ gs_boat_r3:
     ld      (_gfx_x2), a
     ld      a, 4               ; COL_RED
     ld      (_gfx_colour), a
-    call    hline_raw
+        call    hline_raw
     jp      gs_boat_done
 gs_boat_r4:
     cp      4
@@ -1213,7 +1246,7 @@ gs_boat_r4:
     ld      (_gfx_x2), a
     ld      a, 0               ; COL_BLACK
     ld      (_gfx_colour), a
-    call    hline_raw
+        call    hline_raw
     jp      gs_boat_done
 gs_boat_r5:
     cp      5
@@ -1227,7 +1260,7 @@ gs_boat_r5:
     ld      (_gfx_x2), a
     ld      a, 0               ; COL_BLACK
     ld      (_gfx_colour), a
-    call    hline_raw
+        call    hline_raw
     jp      gs_boat_done
 gs_boat_r6:
     cp      6
@@ -1241,7 +1274,7 @@ gs_boat_r6:
     ld      (_gfx_x2), a
     ld      a, 0               ; COL_BLACK
     ld      (_gfx_colour), a
-    call    hline_raw
+        call    hline_raw
     jp      gs_boat_done
 gs_boat_r7:
     cp      7
@@ -1259,8 +1292,573 @@ gs_boat_r7:
     ld      (_gfx_x2), a
     ld      a, 0               ; COL_BLACK
     ld      (_gfx_colour), a
-    call    hline_raw
+        call    hline_raw
 gs_boat_done:
+    xor     a
+    ld      (_gs_blit_active), a
+
+    jp      gs_no_fuel
+
+    ; ── JET (16x6) — 1=BrBlue(9), 2=Cyan(3), 3=BrCyan(11) ──
+    ; Reversed for downward scroll (row 0 drawn first = bottom on screen)
+    ; R0: ........3333....   3 x+8..x+11   (was R5)
+    ; R1: ......333333....   3 x+6..x+11   (was R4)
+    ; R2: 22222222....22..   2 x+0..x+7, 2 x+12..x+13  (was R3)
+    ; R3: 2222222222222222   2 x+0..x+15   (was R2)
+    ; R4: ..1111......1111   1 x+2..x+5, 1 x+12..x+15  (was R1)
+    ; R5: ..............11   1 x+14..x+15  (was R0)
+gs_draw_jet:
+    ld      a, (_gs_blit_row)
+    ; Row 0: BrCyan x+8..x+11
+    or      a
+    jr      nz, gs_jet_r1
+    ld      a, (_gs_blit_x)
+    add     a, 8
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 11
+    ld      (_gfx_x2), a
+    ld      a, 11              ; COL_BRCYAN
+    ld      (_gfx_colour), a
+        call    hline_raw
+    jp      gs_jet_done
+gs_jet_r1:
+    cp      1
+    jr      nz, gs_jet_r2
+    ; BrCyan x+6..x+11
+    ld      a, (_gs_blit_x)
+    add     a, 6
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 11
+    ld      (_gfx_x2), a
+    ld      a, 11              ; COL_BRCYAN
+    ld      (_gfx_colour), a
+        call    hline_raw
+    jp      gs_jet_done
+gs_jet_r2:
+    cp      2
+    jr      nz, gs_jet_r3
+    ; Cyan x+0..x+7
+    ld      a, (_gs_blit_x)
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 7
+    ld      (_gfx_x2), a
+    ld      a, 3               ; COL_CYAN
+    ld      (_gfx_colour), a
+        call    hline_raw
+    ; Cyan x+12..x+13
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_blit_x)
+    add     a, 12
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 13
+    ld      (_gfx_x2), a
+    ld      a, 3               ; COL_CYAN
+    ld      (_gfx_colour), a
+        call    hline_raw
+    jp      gs_jet_done
+gs_jet_r3:
+    cp      3
+    jr      nz, gs_jet_r4
+    ; Cyan x+0..x+15 (full width)
+    ld      a, (_gs_blit_x)
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 15
+    ld      (_gfx_x2), a
+    ld      a, 3               ; COL_CYAN
+    ld      (_gfx_colour), a
+        call    hline_raw
+    jp      gs_jet_done
+gs_jet_r4:
+    cp      4
+    jr      nz, gs_jet_r5
+    ; BrBlue x+2..x+5
+    ld      a, (_gs_blit_x)
+    add     a, 2
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 5
+    ld      (_gfx_x2), a
+    ld      a, 9               ; COL_BRBLUE
+    ld      (_gfx_colour), a
+        call    hline_raw
+    ; BrBlue x+12..x+15
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_blit_x)
+    add     a, 12
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 15
+    ld      (_gfx_x2), a
+    ld      a, 9               ; COL_BRBLUE
+    ld      (_gfx_colour), a
+        call    hline_raw
+    jp      gs_jet_done
+gs_jet_r5:
+    cp      5
+    jr      nz, gs_jet_done
+    ; BrBlue x+14..x+15
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_blit_x)
+    add     a, 14
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 15
+    ld      (_gfx_x2), a
+    ld      a, 9               ; COL_BRBLUE
+    ld      (_gfx_colour), a
+        call    hline_raw
+gs_jet_done:
+    xor     a
+    ld      (_gs_blit_active), a
+    jp      gs_no_fuel
+
+    ; ══════════════════════════════════════════════════════════
+    ; MIRRORED SPRITES — pre-computed flipped x-offsets
+    ; Mirror formula for width W: x+a..x+b → x+(W-1-b)..x+(W-1-a)
+    ; ══════════════════════════════════════════════════════════
+
+    ; ── HELICOPTER MIRRORED (16x10, W=16) ──
+    ; R0: G x+2..x+7   R1: G x+4..x+5
+    ; R2: G x+14..x+15, G x+2..x+7   R3: L x+0..x+15
+    ; R4: L x+0..x+15   R5: G x+14..x+15, G x+0..x+9
+    ; R6: G x+2..x+7   R7: Y x+4..x+5
+    ; R8: Y x+0..x+5   R9: Y x+4..x+9
+gs_draw_heli_m:
+    ld      a, (_gs_blit_row)
+    or      a
+    jr      nz, gs_hm_r1
+    ; G x+2..x+7
+    ld      a, (_gs_blit_x)
+    add     a, 2
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 7
+    ld      (_gfx_x2), a
+    ld      a, 2
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_hm_done
+gs_hm_r1:
+    cp      1
+    jr      nz, gs_hm_r2
+    ; G x+4..x+5
+    ld      a, (_gs_blit_x)
+    add     a, 4
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 5
+    ld      (_gfx_x2), a
+    ld      a, 2
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_hm_done
+gs_hm_r2:
+    cp      2
+    jr      nz, gs_hm_r3
+    ; G x+14..x+15
+    ld      a, (_gs_blit_x)
+    add     a, 14
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 15
+    ld      (_gfx_x2), a
+    ld      a, 2
+    ld      (_gfx_colour), a
+    call    hline_raw
+    ; G x+2..x+7
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_blit_x)
+    add     a, 2
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 7
+    ld      (_gfx_x2), a
+    ld      a, 2
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_hm_done
+gs_hm_r3:
+    cp      3
+    jr      nz, gs_hm_r4
+    ; L x+0..x+15
+    ld      a, (_gs_blit_x)
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 15
+    ld      (_gfx_x2), a
+    ld      a, 7
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_hm_done
+gs_hm_r4:
+    cp      4
+    jr      nz, gs_hm_r5
+    ; L x+0..x+15
+    ld      a, (_gs_blit_x)
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 15
+    ld      (_gfx_x2), a
+    ld      a, 7
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_hm_done
+gs_hm_r5:
+    cp      5
+    jr      nz, gs_hm_r6
+    ; G x+14..x+15
+    ld      a, (_gs_blit_x)
+    add     a, 14
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 15
+    ld      (_gfx_x2), a
+    ld      a, 2
+    ld      (_gfx_colour), a
+    call    hline_raw
+    ; G x+0..x+9
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_blit_x)
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 9
+    ld      (_gfx_x2), a
+    ld      a, 2
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_hm_done
+gs_hm_r6:
+    cp      6
+    jr      nz, gs_hm_r7
+    ; G x+2..x+7
+    ld      a, (_gs_blit_x)
+    add     a, 2
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 7
+    ld      (_gfx_x2), a
+    ld      a, 2
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_hm_done
+gs_hm_r7:
+    cp      7
+    jr      nz, gs_hm_r8
+    ; Y x+4..x+5
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_blit_x)
+    add     a, 4
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 5
+    ld      (_gfx_x2), a
+    ld      a, 6
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_hm_done
+gs_hm_r8:
+    cp      8
+    jr      nz, gs_hm_r9
+    ; Y x+0..x+5
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_blit_x)
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 5
+    ld      (_gfx_x2), a
+    ld      a, 6
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_hm_done
+gs_hm_r9:
+    cp      9
+    jr      nz, gs_hm_done
+    ; Y x+4..x+9
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_blit_x)
+    add     a, 4
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 9
+    ld      (_gfx_x2), a
+    ld      a, 6
+    ld      (_gfx_colour), a
+    call    hline_raw
+gs_hm_done:
+    xor     a
+    ld      (_gs_blit_active), a
+    jp      gs_no_fuel
+
+    ; ── BOAT MIRRORED (32x8, W=32) ──
+    ; R0: L x+5..x+23   R1: L x+0..x+23
+    ; R2: R x+0..x+27   R3: R x+0..x+31
+    ; R4: B x+4..x+19   R5: B x+8..x+15
+    ; R6: B x+12..x+15  R7: B x+12..x+15
+gs_draw_boat_m:
+    ld      a, (_gs_blit_row)
+    or      a
+    jr      nz, gs_bm_r1
+    ; L x+5..x+23
+    ld      a, (_gs_blit_x)
+    add     a, 5
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 23
+    ld      (_gfx_x2), a
+    ld      a, 7
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_bm_done
+gs_bm_r1:
+    cp      1
+    jr      nz, gs_bm_r2
+    ; L x+0..x+23
+    ld      a, (_gs_blit_x)
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 23
+    ld      (_gfx_x2), a
+    ld      a, 7
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_bm_done
+gs_bm_r2:
+    cp      2
+    jr      nz, gs_bm_r3
+    ; R x+0..x+27
+    ld      a, (_gs_blit_x)
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 27
+    ld      (_gfx_x2), a
+    ld      a, 4
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_bm_done
+gs_bm_r3:
+    cp      3
+    jr      nz, gs_bm_r4
+    ; R x+0..x+31
+    ld      a, (_gs_blit_x)
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 31
+    ld      (_gfx_x2), a
+    ld      a, 4
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_bm_done
+gs_bm_r4:
+    cp      4
+    jr      nz, gs_bm_r5
+    ; B x+4..x+19
+    ld      a, (_gs_blit_x)
+    add     a, 4
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 19
+    ld      (_gfx_x2), a
+    xor     a
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_bm_done
+gs_bm_r5:
+    cp      5
+    jr      nz, gs_bm_r6
+    ; B x+8..x+15
+    ld      a, (_gs_blit_x)
+    add     a, 8
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 15
+    ld      (_gfx_x2), a
+    xor     a
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_bm_done
+gs_bm_r6:
+    cp      6
+    jr      nz, gs_bm_r7
+    ; B x+12..x+15
+    ld      a, (_gs_blit_x)
+    add     a, 12
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 15
+    ld      (_gfx_x2), a
+    xor     a
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_bm_done
+gs_bm_r7:
+    cp      7
+    jr      nz, gs_bm_done
+    ; B x+12..x+15
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_blit_x)
+    add     a, 12
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 15
+    ld      (_gfx_x2), a
+    xor     a
+    ld      (_gfx_colour), a
+    call    hline_raw
+gs_bm_done:
+    xor     a
+    ld      (_gs_blit_active), a
+    jp      gs_no_fuel
+
+    ; ── JET MIRRORED (16x6, W=16) ──
+    ; R0: 3 x+4..x+7    R1: 3 x+4..x+9
+    ; R2: 2 x+2..x+3, 2 x+8..x+15   R3: 2 x+0..x+15
+    ; R4: 1 x+0..x+3, 1 x+10..x+13   R5: 1 x+0..x+1
+gs_draw_jet_m:
+    ld      a, (_gs_blit_row)
+    or      a
+    jr      nz, gs_jm_r1
+    ; BrCyan x+4..x+7
+    ld      a, (_gs_blit_x)
+    add     a, 4
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 7
+    ld      (_gfx_x2), a
+    ld      a, 11
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_jm_done
+gs_jm_r1:
+    cp      1
+    jr      nz, gs_jm_r2
+    ; BrCyan x+4..x+9
+    ld      a, (_gs_blit_x)
+    add     a, 4
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 9
+    ld      (_gfx_x2), a
+    ld      a, 11
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_jm_done
+gs_jm_r2:
+    cp      2
+    jr      nz, gs_jm_r3
+    ; Cyan x+2..x+3
+    ld      a, (_gs_blit_x)
+    add     a, 2
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 3
+    ld      (_gfx_x2), a
+    ld      a, 3
+    ld      (_gfx_colour), a
+    call    hline_raw
+    ; Cyan x+8..x+15
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_blit_x)
+    add     a, 8
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 15
+    ld      (_gfx_x2), a
+    ld      a, 3
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_jm_done
+gs_jm_r3:
+    cp      3
+    jr      nz, gs_jm_r4
+    ; Cyan x+0..x+15
+    ld      a, (_gs_blit_x)
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 15
+    ld      (_gfx_x2), a
+    ld      a, 3
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_jm_done
+gs_jm_r4:
+    cp      4
+    jr      nz, gs_jm_r5
+    ; BrBlue x+0..x+3
+    ld      a, (_gs_blit_x)
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 3
+    ld      (_gfx_x2), a
+    ld      a, 9
+    ld      (_gfx_colour), a
+    call    hline_raw
+    ; BrBlue x+10..x+13
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_blit_x)
+    add     a, 10
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 13
+    ld      (_gfx_x2), a
+    ld      a, 9
+    ld      (_gfx_colour), a
+    call    hline_raw
+    jp      gs_jm_done
+gs_jm_r5:
+    cp      5
+    jr      nz, gs_jm_done
+    ; BrBlue x+0..x+1
+    ld      a, (_riv_y)
+    ld      (_gfx_y1), a
+    xor     a
+    ld      (_gfx_y1+1), a
+    ld      a, (_gs_blit_x)
+    ld      (_gfx_x1), a
+    ld      a, (_gs_blit_x)
+    add     a, 1
+    ld      (_gfx_x2), a
+    ld      a, 9
+    ld      (_gfx_colour), a
+    call    hline_raw
+gs_jm_done:
     xor     a
     ld      (_gs_blit_active), a
 
@@ -2036,4 +2634,247 @@ txt_row_nc:
 txt_done:
     call    swapgfxbk1
     pop     ix
+    ret
+
+; ============================================================
+; vid_enemy_shift_asm — shift enemy sprite in VRAM horizontally
+; Shifts pixel data by 1 byte (2px, ENEMY_SPEED=2) using LDIR/LDDR.
+; Preserves the detailed sprite appearance.
+; Reads: _es_screen_y (modified!), _es_old_x, _es_new_x,
+;        _es_width, _es_height
+; VRAM layout: Y*128 + X/2, hardware scroll is transparent.
+; ============================================================
+_vid_enemy_shift_asm:
+    ; Check if actually shifted
+    ld      a, (_es_new_x)
+    ld      c, a
+    ld      a, (_es_old_x)
+    cp      c
+    ret     z                   ; no change
+
+    call    swapgfxbk           ; bank in VRAM
+
+    ld      a, (_es_height)
+    or      a
+    jp      z, es_done
+
+    ; Determine direction
+    ld      a, (_es_new_x)
+    ld      c, a
+    ld      a, (_es_old_x)
+    cp      c
+    jp      nc, es_do_left      ; old >= new -> shifting left
+
+    ; === RIGHT SHIFT (new_x > old_x) ===
+    ld      a, (_es_height)
+    ld      b, a
+es_rr:
+    push    bc
+    ; Compute base = screen_y * 128
+    ld      a, (_es_screen_y)
+    ld      e, a                ; save Y
+    srl     a
+    ld      h, a                ; H = Y >> 1
+    ld      a, e
+    rrca
+    and     $80
+    ld      l, a                ; L = (Y & 1) ? 0x80 : 0
+    ; HL = VRAM row base
+
+    ; Point HL to last source byte: base + old_x/2 + width/2 - 1
+    ld      a, (_es_old_x)
+    srl     a
+    ld      c, a                ; C = old_x/2
+    ld      a, (_es_width)
+    srl     a                   ; A = width/2 = byte count
+    push    af                  ; save byte count
+    add     a, c
+    dec     a                   ; A = offset to last source byte
+    ld      e, a
+    ld      d, 0
+    add     hl, de              ; HL = last source byte
+
+    ; DE = last dest byte = HL + 1
+    ld      d, h
+    ld      e, l
+    inc     de
+
+    ; BC = byte count
+    pop     af                  ; A = width/2
+    ld      c, a
+    ld      b, 0
+
+    lddr                        ; copy backwards
+
+    ; Clear leftmost uncovered byte (blue = 0x11)
+    ; After LDDR: HL = first_src - 1
+    inc     hl
+    ld      (hl), $11
+
+    ; Next row
+    ld      a, (_es_screen_y)
+    inc     a
+    ld      (_es_screen_y), a
+
+    pop     bc
+    djnz    es_rr
+    jp      es_done
+
+es_do_left:
+    ; === LEFT SHIFT (new_x < old_x) ===
+    ld      a, (_es_height)
+    ld      b, a
+es_lr:
+    push    bc
+    ; Compute base = screen_y * 128
+    ld      a, (_es_screen_y)
+    ld      e, a
+    srl     a
+    ld      h, a
+    ld      a, e
+    rrca
+    and     $80
+    ld      l, a
+    ; HL = VRAM row base
+
+    ; Source start = base + old_x/2
+    ld      a, (_es_old_x)
+    srl     a
+    ld      e, a
+    ld      d, 0
+    add     hl, de              ; HL = source start
+
+    ; Dest start = HL - 1 (shift left by 1 byte)
+    ld      d, h
+    ld      e, l
+    dec     de                  ; DE = dest start
+
+    ; BC = width/2
+    ld      a, (_es_width)
+    srl     a
+    ld      c, a
+    ld      b, 0
+
+    ldir                        ; copy forward
+
+    ; Clear rightmost uncovered byte
+    ; After LDIR: HL = last_src + 1
+    dec     hl
+    ld      (hl), $11           ; blue
+
+    ; Next row
+    ld      a, (_es_screen_y)
+    inc     a
+    ld      (_es_screen_y), a
+
+    pop     bc
+    djnz    es_lr
+
+es_done:
+    call    swapgfxbk1
+    ret
+
+; ============================================================
+; vid_enemy_mirror_asm — mirror sprite horizontally in VRAM
+; Reverses byte order + swaps nibbles within each byte per row.
+; Mode 3: low nibble=left pixel, high nibble=right pixel.
+; Reads: _es_screen_y (modified!), _es_old_x (=X), _es_width, _es_height
+; ============================================================
+_vid_enemy_mirror_asm:
+    ld      a, (_es_height)
+    or      a
+    ret     z
+
+    call    swapgfxbk           ; bank in VRAM
+
+    ld      a, (_es_height)
+    ld      b, a
+
+em_row:
+    push    bc
+
+    ; Compute VRAM row base: screen_y * 128
+    ld      a, (_es_screen_y)
+    srl     a
+    ld      h, a
+    ld      a, (_es_screen_y)
+    rrca
+    and     $80
+    ld      l, a
+    ; HL = VRAM row base
+
+    ; HL = start = base + x/2
+    ld      a, (_es_old_x)
+    srl     a
+    ld      e, a
+    ld      d, 0
+    add     hl, de              ; HL = first byte
+
+    ; DE = end = start + width/2 - 1
+    ld      a, (_es_width)
+    srl     a
+    dec     a
+    ld      e, a
+    ld      d, 0
+    push    hl
+    add     hl, de
+    ex      de, hl              ; DE = last byte
+    pop     hl                  ; HL = first byte
+
+em_swap_loop:
+    ; Continue while DE > HL
+    ld      a, d
+    cp      h
+    jr      c, em_swap_done     ; D < H -> past each other
+    jr      nz, em_do_swap      ; D > H -> continue
+    ld      a, e
+    cp      l
+    jr      c, em_swap_done     ; E < L -> past each other
+    jr      z, em_middle        ; equal -> single middle byte
+
+em_do_swap:
+    ; Read (HL), swap nibbles
+    ld      a, (hl)
+    rrca
+    rrca
+    rrca
+    rrca
+    ld      b, a
+
+    ; Read (DE), swap nibbles
+    ld      a, (de)
+    rrca
+    rrca
+    rrca
+    rrca
+    ld      c, a
+
+    ; Write crossed
+    ld      (hl), c
+    ld      a, b
+    ld      (de), a
+
+    inc     hl
+    dec     de
+    jr      em_swap_loop
+
+em_middle:
+    ; Single middle byte: just swap nibbles in place
+    ld      a, (hl)
+    rrca
+    rrca
+    rrca
+    rrca
+    ld      (hl), a
+
+em_swap_done:
+    ; Next row
+    ld      a, (_es_screen_y)
+    inc     a
+    ld      (_es_screen_y), a
+
+    pop     bc
+    djnz    em_row
+
+    call    swapgfxbk1
     ret

@@ -24,9 +24,12 @@ extern uint8_t gs_do_plane;
 #define HELI_H   10
 #define BOAT_W   32
 #define BOAT_H   8
+#define JET_W    16
+#define JET_H    6
 #define BLIT_FUEL  0
 #define BLIT_HELI  1
 #define BLIT_BOAT  2
+#define BLIT_JET   3
 #define LIVES_START 3
 
 /* ── Delay loop ── */
@@ -231,9 +234,17 @@ static uint16_t fuel_gap;
 static uint8_t enemy_x;
 static uint16_t enemy_step;
 static uint16_t enemy_gap;
-static uint8_t enemy_type;     /* BLIT_HELI or BLIT_BOAT */
+static uint8_t enemy_type;     /* BLIT_HELI, BLIT_BOAT, or BLIT_JET */
 static uint8_t enemy_h;        /* height of current enemy */
 static uint8_t enemy_w;        /* width of current enemy */
+static uint8_t enemy_mirror;   /* 1 = horizontally flipped */
+static uint8_t enemy_dir;      /* 0 = moving right, 1 = moving left */
+static uint8_t enemy_prev_x;   /* X position last drawn (for erase) */
+static uint16_t game_timer;    /* frame counter since level start */
+static uint8_t mv_bl, mv_br, mv_tmp;  /* movement bank-bounds scratch */
+
+#define ENEMY_MOVE_DELAY 200   /* ~4 seconds at 50Hz */
+#define ENEMY_SPEED      2     /* pixels per frame */
 
 /* Simple 8-bit LFSR RNG */
 static uint8_t rng_state;
@@ -314,6 +325,10 @@ restart:
     enemy_type = BLIT_HELI;
     enemy_h = HELI_H;
     enemy_w = HELI_W;
+    enemy_mirror = 0;
+    enemy_dir = 0;
+    enemy_prev_x = 80;
+    game_timer = 0;
     rng_state = frame_counter | 1;  /* seed RNG, ensure non-zero */
 
     /* Fill screen with initial river + store bank edges */
@@ -360,13 +375,106 @@ restart:
         }
 
         /* Fire rocket */
-        if ((gl_keys & KBIT_FIRE) && !rocket_prev_fired && !rocket_active) {
-            rocket_active = 1;
-            rocket_x = (plane_x + (PLANE_W / 2) - (ROCKET_W / 2)) & 0xFE;
-            rocket_vy = PLANE_Y;  /* starts at plane top */
-            snd_shoot();
+        if (gl_keys & KBIT_FIRE) {
+            if (rocket_prev_fired == 0) {
+                if (rocket_active == 0) {
+                    rocket_active = 1;
+                    rocket_x = (plane_x + (PLANE_W / 2) - (ROCKET_W / 2)) & 0xFE;
+                    rocket_vy = PLANE_Y;  /* starts at plane top */
+                    snd_shoot();
+                }
+            }
         }
-        rocket_prev_fired = (gl_keys & KBIT_FIRE) ? 1 : 0;
+        if (gl_keys & KBIT_FIRE) {
+            rocket_prev_fired = 1;
+        } else {
+            rocket_prev_fired = 0;
+        }
+
+        /* Game timer for enabling enemy movement */
+        if (game_timer < ENEMY_MOVE_DELAY)
+            game_timer++;
+
+        /* Per-frame enemy horizontal movement + VRAM redraw */
+        if (game_timer >= ENEMY_MOVE_DELAY) {
+            if (enemy_killed == 0) {
+                if (enemy_step > (uint16_t)enemy_h) {
+                    if (enemy_step < (uint16_t)(PLANE_Y + enemy_h)) {
+                        uint8_t old_ex, old_dir, ey_phys;
+                        old_ex = enemy_x;
+                        old_dir = enemy_dir;
+                        /* Sample bank bounds at top, mid, bottom of sprite */
+                        ey_phys = (uint8_t)((uint8_t)(enemy_step - enemy_h) + gl_scroll_reg);
+                        mv_bl = bank_l[ey_phys];
+                        mv_br = bank_r[ey_phys];
+                        mv_tmp = bank_l[(uint8_t)(ey_phys + (enemy_h >> 1))];
+                        if (mv_tmp > mv_bl) mv_bl = mv_tmp;
+                        mv_tmp = bank_r[(uint8_t)(ey_phys + (enemy_h >> 1))];
+                        if (mv_tmp < mv_br) mv_br = mv_tmp;
+                        mv_tmp = bank_l[(uint8_t)(ey_phys + enemy_h - 1)];
+                        if (mv_tmp > mv_bl) mv_bl = mv_tmp;
+                        mv_tmp = bank_r[(uint8_t)(ey_phys + enemy_h - 1)];
+                        if (mv_tmp < mv_br) mv_br = mv_tmp;
+                        if (enemy_type == BLIT_JET) {
+                            /* Jet: fly straight across, despawn at bank */
+                            if (enemy_dir == 0) {
+                                if (enemy_x + enemy_w + ENEMY_SPEED >= mv_br) {
+                                    enemy_step = (uint16_t)(PLANE_Y + PLANE_H + enemy_h);
+                                } else {
+                                    enemy_x = (enemy_x + ENEMY_SPEED) & 0xFE;
+                                }
+                            } else {
+                                if (enemy_x < mv_bl + ENEMY_SPEED + 2) {
+                                    enemy_step = (uint16_t)(PLANE_Y + PLANE_H + enemy_h);
+                                } else {
+                                    enemy_x = (enemy_x - ENEMY_SPEED) & 0xFE;
+                                }
+                            }
+                        } else {
+                            /* Heli/Boat: bounce within river banks */
+                            if (enemy_dir == 0) {
+                                if (enemy_x + enemy_w + ENEMY_SPEED + 4 >= mv_br) {
+                                    enemy_dir = 1;
+                                    if (enemy_type == BLIT_BOAT) {
+                                        enemy_mirror = 0;
+                                    } else {
+                                        enemy_mirror = 1;
+                                    }
+                                    enemy_x = (enemy_x - ENEMY_SPEED) & 0xFE;
+                                } else {
+                                    enemy_x = (enemy_x + ENEMY_SPEED) & 0xFE;
+                                }
+                            } else {
+                                if (enemy_x < mv_bl + ENEMY_SPEED + 6) {
+                                    enemy_dir = 0;
+                                    if (enemy_type == BLIT_BOAT) {
+                                        enemy_mirror = 1;
+                                    } else {
+                                        enemy_mirror = 0;
+                                    }
+                                    enemy_x = (enemy_x + ENEMY_SPEED) & 0xFE;
+                                } else {
+                                    enemy_x = (enemy_x - ENEMY_SPEED) & 0xFE;
+                                }
+                            }
+                        }
+                        /* If enemy_x changed, shift sprite data in VRAM */
+                        if (enemy_x != old_ex) {
+                            uint8_t sy;
+                            sy = (uint8_t)(enemy_step - enemy_h);
+                            vid_enemy_shift(sy, old_ex, enemy_x, enemy_w, enemy_h);
+                            enemy_prev_x = enemy_x;
+                        }
+                        /* If direction changed, mirror sprite bitmap in VRAM */
+                        if (enemy_dir != old_dir) {
+                            uint8_t sy;
+                            sy = (uint8_t)(enemy_step - enemy_h);
+                            vid_enemy_mirror(sy, enemy_x, enemy_w, enemy_h);
+                        }
+                    }
+                }
+            }
+        }
 
         /* Batch scroll_speed steps per vblank */
         for (gl_input_ctr = 0; gl_input_ctr < scroll_speed; gl_input_ctr++) {
@@ -381,9 +489,11 @@ restart:
             /* Decide which object to blit this step: enemy takes priority */
             if (enemy_step < enemy_h) {
                 vid_set_blit_type(enemy_type);
+                vid_set_blit_mirror(enemy_mirror);
                 vid_set_blit(1, enemy_x, (uint8_t)enemy_step);
             } else if (fuel_row < FUEL_H) {
                 vid_set_blit_type(BLIT_FUEL);
+                vid_set_blit_mirror(0);
                 vid_set_blit(1, fuel_x, fuel_row);
             } else {
                 vid_set_blit(0, 0, 0);
@@ -395,14 +505,16 @@ restart:
             vid_game_step(gl_scroll_reg, 0, gl_left, gl_right, plane_x, PLANE_Y, COL_YELLOW);
 
             /* Advance fuel draw row (only when actually blitting) */
-            if (enemy_step >= enemy_h && fuel_row < FUEL_H) {
-                fuel_row++;
+            if (enemy_step >= enemy_h) {
+                if (fuel_row < FUEL_H) {
+                    fuel_row++;
+                }
             }
 
             /* Always advance fuel position counter (tracks scrolling) */
             fuel_step++;
-            if (fuel_step >= (uint16_t)(FUEL_H + fuel_gap)
-                && enemy_step >= (uint16_t)(enemy_h + FUEL_H + 20)) {
+            if (fuel_step >= (uint16_t)(FUEL_H + fuel_gap)) {
+              if (enemy_step >= (uint16_t)(enemy_h + FUEL_H + 20)) {
                 uint8_t rnd, range;
                 fuel_step = 0;
                 fuel_row = 0;
@@ -415,50 +527,102 @@ restart:
                     fuel_x = gl_left + 2;
                 }
                 fuel_x = fuel_x & 0xFE;
+              }
             }
 
             /* Advance enemy counter — reset after passing plane + gap */
             enemy_step++;
-            if (enemy_step >= (uint16_t)(PLANE_Y + PLANE_H + enemy_h + enemy_gap)
-                && fuel_step >= (uint16_t)(FUEL_H + FUEL_H + 20)) {
+            if (enemy_step >= (uint16_t)(PLANE_Y + PLANE_H + enemy_h + enemy_gap)) {
+              if (fuel_step >= (uint16_t)(FUEL_H + FUEL_H + 20)) {
                 uint8_t rnd, range;
                 enemy_step = 0;
                 enemy_killed = 0;
                 rnd = rng_next();
-                /* Random heli/boat selection */
-                if (rnd & 0x01) {
-                    enemy_type = BLIT_HELI;
-                    enemy_h = HELI_H;
-                    enemy_w = HELI_W;
+                /* Random heli/boat/jet selection */
+                {
+                    uint8_t sel;
+                    sel = rnd % 3;
+                    if (sel == 0) {
+                        enemy_type = BLIT_HELI;
+                        enemy_h = HELI_H;
+                        enemy_w = HELI_W;
+                    } else if (sel == 1) {
+                        enemy_type = BLIT_BOAT;
+                        enemy_h = BOAT_H;
+                        enemy_w = BOAT_W;
+                    } else {
+                        enemy_type = BLIT_JET;
+                        enemy_h = JET_H;
+                        enemy_w = JET_W;
+                    }
+                }
+                if (rnd & 0x10) {
+                    enemy_dir = 1;
                 } else {
-                    enemy_type = BLIT_BOAT;
-                    enemy_h = BOAT_H;
-                    enemy_w = BOAT_W;
+                    enemy_dir = 0;
+                }
+                /* Boat sprite faces opposite way from heli/jet */
+                if (enemy_type == BLIT_BOAT) {
+                    if (enemy_dir == 0) {
+                        enemy_mirror = 1;
+                    } else {
+                        enemy_mirror = 0;
+                    }
+                } else {
+                    enemy_mirror = enemy_dir;
                 }
                 enemy_gap = 2 + (uint16_t)(rnd & 0x07);
-                range = gl_right - gl_left;
-                if (range > enemy_w + 4) {
-                    enemy_x = gl_left + 2 + (rnd % (range - enemy_w - 2));
+
+                if (game_timer >= ENEMY_MOVE_DELAY) {
+                    if (enemy_type == BLIT_JET) {
+                        /* Jet: start from bank edge, fly across river */
+                        if (enemy_dir == 0) {
+                            enemy_x = (gl_left + 2) & 0xFE;
+                        } else {
+                            enemy_x = (gl_right - enemy_w - 2) & 0xFE;
+                        }
+                    } else {
+                        /* Heli/Boat: random position within river */
+                        range = gl_right - gl_left;
+                        if (range > enemy_w + 4) {
+                            enemy_x = gl_left + 2 + (rnd % (range - enemy_w - 2));
+                        } else {
+                            enemy_x = gl_left + 2;
+                        }
+                        enemy_x = enemy_x & 0xFE;
+                    }
                 } else {
-                    enemy_x = gl_left + 2;
+                    /* Not moving yet — place in river */
+                    range = gl_right - gl_left;
+                    if (range > enemy_w + 4) {
+                        enemy_x = gl_left + 2 + (rnd % (range - enemy_w - 2));
+                    } else {
+                        enemy_x = gl_left + 2;
+                    }
+                    enemy_x = enemy_x & 0xFE;
                 }
-                enemy_x = enemy_x & 0xFE;
+                enemy_prev_x = enemy_x;
+              }
             }
 
             /* --- Per-step collision checks (instant response) --- */
 
             /* Barrel collision (pickup) */
-            if (fuel_row > 0 &&
-                fuel_step >= (uint16_t)PLANE_Y &&
-                fuel_step <= (uint16_t)(PLANE_Y + PLANE_H + fuel_row - 1)) {
-                if (plane_x + PLANE_W > fuel_x && plane_x < fuel_x + FUEL_W) {
-                    fuel = fuel + FUEL_PICKUP;
-                    if (fuel > FUEL_FULL) fuel = FUEL_FULL;
-                    snd_refuel();
-                    fuel_step = (uint16_t)(PLANE_Y + PLANE_H + FUEL_H);
-                    fuel_row = FUEL_H;
-                    score += 100;
+            if (fuel_row > 0) {
+              if (fuel_step >= (uint16_t)PLANE_Y) {
+                if (fuel_step <= (uint16_t)(PLANE_Y + PLANE_H + fuel_row - 1)) {
+                  if (plane_x + PLANE_W > fuel_x) {
+                    if (plane_x < fuel_x + FUEL_W) {
+                      fuel = fuel + FUEL_PICKUP;
+                      if (fuel > FUEL_FULL) fuel = FUEL_FULL;
+                      snd_refuel();
+                      fuel_step = (uint16_t)(PLANE_Y + PLANE_H + FUEL_H);
+                      fuel_row = FUEL_H;
+                      score += 100;
+                    }
+                  }
                 }
+              }
             }
 
             /* River bank collision */
@@ -466,25 +630,35 @@ restart:
                 uint8_t bl, br;
                 bl = bank_l[(uint8_t)(PLANE_Y + gl_scroll_reg)];
                 br = bank_r[(uint8_t)(PLANE_Y + gl_scroll_reg)];
-                if (plane_x < bl || (plane_x + PLANE_W) > br) {
+                if (plane_x < bl) {
+                    crash_enemy = 0;
+                    goto crash;
+                }
+                if ((plane_x + PLANE_W) > br) {
                     crash_enemy = 0;
                     goto crash;
                 }
             }
 
             /* Enemy collision — skip if already killed by rocket */
-            if (hit_flash == 0 && !enemy_killed &&
-                enemy_step >= (uint16_t)PLANE_Y &&
-                enemy_step <= (uint16_t)(PLANE_Y + PLANE_H + enemy_h - 2)) {
-                if (plane_x + PLANE_W > enemy_x && plane_x < enemy_x + enemy_w) {
-                    crash_enemy = 1;
-                    crash_ex = enemy_x;
-                    crash_ew = enemy_w;
-                    crash_eh = enemy_h + 4;
-                    /* Enemy top screen Y = enemy_step - enemy_h */
-                    crash_ey = (uint8_t)((uint8_t)enemy_step - enemy_h);
-                    enemy_step = (uint16_t)(PLANE_Y + PLANE_H + enemy_h);
-                    goto crash;
+            if (hit_flash == 0) {
+                if (enemy_killed == 0) {
+                    if (enemy_step >= (uint16_t)PLANE_Y) {
+                        if (enemy_step <= (uint16_t)(PLANE_Y + PLANE_H + enemy_h - 2)) {
+                            if (plane_x + PLANE_W > enemy_x) {
+                                if (plane_x < enemy_x + enemy_w) {
+                                    crash_enemy = 1;
+                                    crash_ex = enemy_x;
+                                    crash_ew = enemy_w;
+                                    crash_eh = enemy_h + 4;
+                                    /* Enemy top screen Y = enemy_step - enemy_h */
+                                    crash_ey = (uint8_t)((uint8_t)enemy_step - enemy_h);
+                                    enemy_step = (uint16_t)(PLANE_Y + PLANE_H + enemy_h);
+                                    goto crash;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -515,18 +689,32 @@ restart:
                     uint8_t rl, rr;
                     rl = bank_l[(uint8_t)(rocket_vy + gl_scroll_reg)];
                     rr = bank_r[(uint8_t)(rocket_vy + gl_scroll_reg)];
-                    if (rocket_x < rl || (rocket_x + ROCKET_W) > rr) {
+                    if (rocket_x < rl) {
                         rocket_active = 0;
                     }
+                    if (rocket_active) {
+                        if ((rocket_x + ROCKET_W) > rr) {
+                            rocket_active = 0;
+                        }
+                    }
                 }
-                /* Rocket-enemy collision: enemy on screen & Y/X overlap */
-                if (rocket_active && enemy_step > 0 &&
-                    (uint16_t)rocket_vy < enemy_step &&
-                    enemy_step < (uint16_t)(rocket_vy + ROCKET_H + enemy_h)) {
-                    if (rocket_x + ROCKET_W > enemy_x && rocket_x < enemy_x + enemy_w) {
+                /* Rocket-enemy collision: enemy on screen & Y/X overlap
+                 * Include ROCKET_SPEED in range to cover the full travel path,
+                 * since the rocket moves 20px/frame and can skip over enemies. */
+                if (rocket_active) {
+                  if (enemy_killed == 0) {
+                    if (enemy_step > 0) {
+                      if ((uint16_t)rocket_vy < enemy_step) {
+                        if (enemy_step < (uint16_t)(rocket_vy + ROCKET_SPEED + ROCKET_H + enemy_h)) {
+                          if (rocket_x + ROCKET_W > enemy_x) {
+                            if (rocket_x < enemy_x + enemy_w) {
                         /* Hit! Erase enemy area and draw explosion dots */
                         uint8_t et, ei;
-                        et = (enemy_step >= enemy_h) ? (uint8_t)(enemy_step - enemy_h) : 0;
+                        if (enemy_step >= enemy_h) {
+                            et = (uint8_t)(enemy_step - enemy_h);
+                        } else {
+                            et = 0;
+                        }
                         /* Erase full object + scroll margin */
                         for (ei = 0; ei < (uint8_t)(enemy_step - et + scroll_speed); ei++) {
                             vid_fill_rect(enemy_x, (uint8_t)(et + ei), enemy_w, 1, COL_BLUE);
@@ -547,13 +735,14 @@ restart:
                         enemy_killed = 1;
                         enemy_step = (uint16_t)(PLANE_Y + PLANE_H + enemy_h);
                         rocket_active = 0;
-                    }
-                }
+                    }}}}}}}
                 /* Rocket-fuel collision: fuel on screen & Y/X overlap */
-                if (rocket_active && fuel_row > 0 &&
-                    (uint16_t)rocket_vy < fuel_step &&
-                    fuel_step < (uint16_t)(rocket_vy + ROCKET_H + fuel_row)) {
-                    if (rocket_x + ROCKET_W > fuel_x && rocket_x < fuel_x + FUEL_W) {
+                if (rocket_active) {
+                  if (fuel_row > 0) {
+                    if ((uint16_t)rocket_vy < fuel_step) {
+                      if (fuel_step < (uint16_t)(rocket_vy + ROCKET_SPEED + ROCKET_H + fuel_row)) {
+                        if (rocket_x + ROCKET_W > fuel_x) {
+                          if (rocket_x < fuel_x + FUEL_W) {
                         /* Hit fuel barrel — erase full drawn area */
                         uint8_t ft, fi, fh;
                         ft = (uint8_t)(fuel_step - fuel_row);
@@ -576,8 +765,7 @@ restart:
                         fuel_step = (uint16_t)(PLANE_Y + PLANE_H + FUEL_H);
                         fuel_row = FUEL_H;
                         rocket_active = 0;
-                    }
-                }
+                    }}}}}}
                 /* Draw at new position */
                 if (rocket_active) {
                     for (ri = 0; ri < ROCKET_H; ri++) {

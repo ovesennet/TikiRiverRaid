@@ -56,6 +56,7 @@ extern uint8_t  gs_blit_active;
 extern uint8_t  gs_blit_x;
 extern uint8_t  gs_blit_row;
 extern uint8_t  gs_blit_type;
+extern uint8_t  gs_blit_mirror;
 
 extern uint8_t  gs_scroll_reg;
 
@@ -159,6 +160,39 @@ void vid_set_blit(uint8_t active, uint8_t x, uint8_t row)
 void vid_set_blit_type(uint8_t type)
 {
     gs_blit_type = type;
+}
+
+extern void vid_enemy_shift_asm(void);
+extern void vid_enemy_mirror_asm(void);
+
+extern uint8_t es_screen_y;
+extern uint8_t es_old_x;
+extern uint8_t es_new_x;
+extern uint8_t es_width;
+extern uint8_t es_height;
+
+void vid_set_blit_mirror(uint8_t mirror)
+{
+    gs_blit_mirror = mirror;
+}
+
+void vid_enemy_shift(uint8_t screen_y, uint8_t old_x, uint8_t new_x, uint8_t width, uint8_t height)
+{
+    es_screen_y = screen_y;
+    es_old_x = old_x;
+    es_new_x = new_x;
+    es_width = width;
+    es_height = height;
+    vid_enemy_shift_asm();
+}
+
+void vid_enemy_mirror(uint8_t screen_y, uint8_t x, uint8_t width, uint8_t height)
+{
+    es_screen_y = screen_y;
+    es_old_x = x;
+    es_width = width;
+    es_height = height;
+    vid_enemy_mirror_asm();
 }
 
 void vid_set_plane_pose(uint8_t pose)

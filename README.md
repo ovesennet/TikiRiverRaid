@@ -4,6 +4,9 @@ A River Raid clone for the **TIKI-100** computer, written in C and Z80 assembly.
 
 NOTE: The game is not bug-free, but playable. You are welcome to contribute by fixing bugs or improving the game.
 
+![Title Screen](img/1.png)
+![Gameplay](img/2.png)
+
 ---
 
 ## Quick Start
